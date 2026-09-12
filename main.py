@@ -31,7 +31,9 @@ DB_PATH = "/opt/btc-trading-os/market.db"
 
 
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=10)
+    conn.execute("PRAGMA busy_timeout=10000")
+    conn.execute("PRAGMA journal_mode=WAL")
     cursor = conn.cursor()
 
     cursor.execute("""
@@ -211,7 +213,8 @@ async def fetch_market():
 
 
 def save_snapshot(results):
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=10)
+    conn.execute("PRAGMA busy_timeout=10000")
     cursor = conn.cursor()
 
     timestamp = datetime.now(timezone.utc).isoformat()
@@ -257,7 +260,8 @@ async def collect_market_snapshot():
 
 
 def get_change(exchange, minutes):
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=10)
+    conn.execute("PRAGMA busy_timeout=10000")
     cursor = conn.cursor()
 
     now = datetime.now(timezone.utc)

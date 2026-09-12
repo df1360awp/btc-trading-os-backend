@@ -9,7 +9,9 @@ DB_PATH = "/opt/btc-trading-os/market.db"
 
 
 def init_trade_db():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=10)
+    conn.execute("PRAGMA busy_timeout=10000")
+    conn.execute("PRAGMA journal_mode=WAL")
     cursor = conn.cursor()
 
     cursor.execute("""
@@ -42,7 +44,8 @@ def save_trade(
     qty_btc,
     price
 ):
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=10)
+    conn.execute("PRAGMA busy_timeout=10000")
     cursor = conn.cursor()
 
     cursor.execute("""
@@ -69,7 +72,8 @@ def save_trade(
 
 
 def get_last_binance_trade_id():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=10)
+    conn.execute("PRAGMA busy_timeout=10000")
     cursor = conn.cursor()
 
     cursor.execute("""
