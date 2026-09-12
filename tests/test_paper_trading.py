@@ -7,6 +7,7 @@ from market.paper_strategies import StrategyRunner
 from market.liquidation import liquidation_pressure
 from market.journal import ImageRequest, JournalEntryRequest, JournalStore, init_journal_tables
 from market.ai_review import ReviewService
+from market.macro import MacroEvent, MacroStore, init_macro_tables
 
 
 @pytest.fixture
@@ -168,3 +169,12 @@ def test_ai_review_persists_entry_result_without_network(tmp_path):
     review = service.create_entry_review(entry["id"])
     assert review["status"] == "COMPLETED"
     assert review["analysis"] == "复盘结果"
+
+
+def test_macro_reminders_are_once_only(tmp_path):
+    db_path=tmp_path / "market.db"; now=1_800_000_000_000; init_macro_tables(str(db_path))
+    store=MacroStore(str(db_path), clock=lambda: now)
+    event=store.create(MacroEvent(title="US CPI",event_type="CPI",scheduled_ms=now+30*60*1000))
+    delivered=[]
+    assert store.send_due(delivered.append, now) == [{"event_id":event["id"],"kind":"T24H"},{"event_id":event["id"],"kind":"T1H"}]
+    assert store.send_due(delivered.append, now) == []

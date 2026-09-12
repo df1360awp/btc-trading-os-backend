@@ -18,6 +18,9 @@ from market.paper_api import router as paper_router
 from market.paper_trading import PaperError, init_paper_tables
 from market.journal import init_journal_tables
 from market.journal_api import router as journal_router
+from market.macro import MacroStore, init_macro_tables
+from market.macro_api import router as macro_router
+from market.fcm_sender import send_to_active_devices
 
 app = FastAPI(title="BTC Trading OS API")
 
@@ -25,6 +28,7 @@ app.include_router(alert_router)
 app.include_router(fcm_router)
 app.include_router(paper_router)
 app.include_router(journal_router)
+app.include_router(macro_router)
 
 
 @app.exception_handler(PaperError)
@@ -32,6 +36,14 @@ async def paper_error_handler(request: Request, exc: PaperError):
     return JSONResponse(status_code=exc.status, content={"error": exc.code, "detail": exc.detail})
 
 DB_PATH = "/opt/btc-trading-os/market.db"
+macro_store = MacroStore(DB_PATH)
+
+
+async def check_macro_reminders():
+    try:
+        await asyncio.to_thread(macro_store.send_due, send_to_active_devices)
+    except Exception as error:
+        print("Macro reminder error:", repr(error))
 
 
 def init_db():
@@ -67,6 +79,7 @@ def init_db():
     conn.close()
     init_paper_tables(DB_PATH)
     init_journal_tables(DB_PATH)
+    init_macro_tables(DB_PATH)
 
 
 async def fetch_binance(client):
@@ -367,6 +380,7 @@ async def startup():
         minutes=1,
         max_instances=1
     )
+    scheduler.add_job(check_macro_reminders, "interval", minutes=5, max_instances=1)
     scheduler.start()
 
     await collect_market_snapshot()
