@@ -103,6 +103,23 @@ def test_user_strategy_conditions_require_current_market_context(engine):
         assert db.execute("SELECT COUNT(*) FROM paper_strategy_events").fetchone()[0] == 1
 
 
+def test_system_strategy_can_gate_existing_signal_with_market_confluence(engine):
+    engine.create_account(AccountRequest(account_id="system-filtered",strategy_type="SYSTEM",strategy_id="b-filtered"),"b-filtered",Decimal("100"))
+    runner = StrategyRunner(engine)
+    runner.create("SYSTEM", {
+        "id": "b-filtered", "account_id": "system-filtered", "quantity": "1",
+        "stop_distance": "10", "take_distance": "20",
+        "conditions": [
+            {"field": "obi.composite_obi", "op": "GTE", "value": "0.05"},
+            {"field": "liquidation.state", "op": "EQ", "value": "SHORT_SQUEEZE"},
+        ],
+    })
+    signal = {"score": 3, "bias": "BULLISH", "structure": "TREND"}
+    assert runner.on_signal(100, signal, {"obi": {"composite_obi": 0.04}, "liquidation": {"state": "SHORT_SQUEEZE"}})["opened"] == 0
+    context = {"obi": {"composite_obi": 0.06}, "liquidation": {"state": "SHORT_SQUEEZE"}}
+    assert runner.on_signal(100, signal, context)["opened"] == 1
+
+
 def test_liquidation_pressure_uses_public_event_history(tmp_path):
     db_path = tmp_path / "market.db"
     now = 1_800_000_000_000

@@ -33,6 +33,9 @@ class SystemStrategy(Model):
     stop_distance: Decimal = Field(gt=0)
     take_distance: Decimal = Field(gt=0)
     cooldown_seconds: int = Field(default=300, ge=0, le=86400)
+    # Optional confluence gates let B consume the existing market context without
+    # changing the Signal Engine that provides its directional signal.
+    conditions: list[dict] = Field(default_factory=list, max_length=12)
 
 
 class StrategyRunner:
@@ -42,7 +45,14 @@ class StrategyRunner:
     @staticmethod
     def conditions_match(conditions, context):
         """Small allowlisted condition DSL; missing/stale fields never trigger a trade."""
-        allowed = {"price", "signal.score", "signal.bias", "signal.structure", "funding.average", "obi.composite_obi"}
+        allowed = {
+            "price", "signal.score", "signal.bias", "signal.structure",
+            "funding.average", "obi.composite_obi",
+            "support_resistance.state", "support_resistance.distance_to_support_pct",
+            "support_resistance.distance_to_resistance_pct",
+            "liquidation.state", "liquidation.imbalance",
+            "liquidation.total_liquidation_usd", "liquidation.recent_5m_liquidation_usd",
+        }
         for item in conditions:
             field, op, expected = item.get("field"), item.get("op"), item.get("value")
             if field not in allowed or op not in {"EQ","GTE","LTE"}: raise PaperError("INVALID_CONDITION","Unsupported strategy condition",422)
@@ -102,7 +112,9 @@ class StrategyRunner:
             direction = "LONG" if bias == "BULLISH" else "SHORT" if bias == "BEARISH" else None
             fingerprint = f"{direction}:{score}:{signal.get('structure')}"; state = row["state"]
             cooling = self.engine.clock() - state.get("last_entry_ms", 0) < d.cooldown_seconds * 1000
-            if not direction or abs(score) < d.min_abs_score or cooling or self.engine.records(d.account_id,"positions"): continue
+            if (not direction or abs(score) < d.min_abs_score or cooling
+                    or self.engine.records(d.account_id,"positions")
+                    or not self.conditions_match(d.conditions, context)): continue
             stop = Decimal(amount(price-d.stop_distance if direction == "LONG" else price+d.stop_distance))
             take = Decimal(amount(price+d.take_distance if direction == "LONG" else price-d.take_distance))
             order = self.engine.enter(d.account_id,EntryRequest(direction=direction,quantity=d.quantity,stop_loss=stop,take_profit=take),"system:"+d.id+":"+str(self.engine.clock()),price)
