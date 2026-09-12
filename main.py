@@ -23,6 +23,7 @@ from market.macro_api import router as macro_router
 from market.fcm_sender import send_to_active_devices
 from market.market_analysis import MarketAnalysisService
 from market.research_context import compose_research_context
+from market.journal import JournalStore
 from market.paper_trading import require_paper_key
 
 app = FastAPI(title="BTC Trading OS API")
@@ -40,6 +41,7 @@ async def paper_error_handler(request: Request, exc: PaperError):
 
 DB_PATH = "/opt/btc-trading-os/market.db"
 macro_store = MacroStore(DB_PATH)
+journal_store = JournalStore(DB_PATH)
 
 
 async def check_macro_reminders():
@@ -325,6 +327,10 @@ async def collect_market_snapshot():
         enriched_context = {**context, "signal": signal, "funding": {"average": sum(x["funding_rate"] for x in results) / len(results)}, "support_resistance": support_resistance(price), "liquidation": liquidation_pressure()}
         user_result = strategies.on_market(price, enriched_context)
         system_result = strategies.on_signal(price, signal, enriched_context)
+        try:
+            journal_store.import_all_paper_trades(engine, price)
+        except Exception as error:
+            print("Paper journal synchronization error:", repr(error))
         await notify_paper_activity(price, marked, user_result, system_result)
 
     if errors:

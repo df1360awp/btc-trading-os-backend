@@ -121,6 +121,12 @@ class JournalStore:
                 if error.code != "JOURNAL_EXISTS": raise
         return imported
 
+    def import_all_paper_trades(self, engine, mark_price):
+        imported=[]
+        for account in engine.accounts(mark_price):
+            imported.extend(self.import_paper_trades(engine, account["account_id"]))
+        return imported
+
     def _remove_private_file(self, value):
         path = Path(value)
         if path.parent == self.upload_dir and path.is_file(): path.unlink()
