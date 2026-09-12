@@ -4,6 +4,7 @@ import pytest
 
 from market.paper_trading import AccountRequest, EntryRequest, PaperEngine, PaperError, ProtectionRequest, connect
 from market.paper_strategies import StrategyRunner
+from market.liquidation import liquidation_pressure
 
 
 @pytest.fixture
@@ -100,3 +101,28 @@ def test_user_strategy_conditions_require_current_market_context(engine):
     assert runner.on_market(100,{"price":100,"signal":{"score":3,"bias":"BULLISH"}})["opened"] == 1
     with connect(engine.db_path) as db:
         assert db.execute("SELECT COUNT(*) FROM paper_strategy_events").fetchone()[0] == 1
+
+
+def test_liquidation_pressure_uses_public_event_history(tmp_path):
+    db_path = tmp_path / "market.db"
+    now = 1_800_000_000_000
+    with connect(str(db_path)) as db:
+        db.execute("""CREATE TABLE liquidation_events (
+            exchange TEXT, event_id TEXT, timestamp_ms INTEGER, side TEXT,
+            price REAL, qty_btc REAL, notional_usd REAL,
+            PRIMARY KEY(exchange, event_id))""")
+        db.executemany(
+            "INSERT INTO liquidation_events VALUES(?,?,?,?,?,?,?)",
+            [
+                ("binance", "one", now - 60_000, "long_liquidation", 100, 1, 100),
+                ("binance", "two", now - 120_000, "short_liquidation", 100, 3, 300),
+                ("binance", "old", now - 1_900_000, "short_liquidation", 100, 9, 900),
+            ],
+        )
+    summary = liquidation_pressure(db_path=str(db_path), now_ms=now)
+    assert summary["long_liquidation_usd"] == 100
+    assert summary["short_liquidation_usd"] == 300
+    assert summary["total_liquidation_usd"] == 400
+    assert summary["recent_5m_liquidation_usd"] == 400
+    assert summary["imbalance"] == pytest.approx(0.5)
+    assert summary["state"] == "SHORT_SQUEEZE"
