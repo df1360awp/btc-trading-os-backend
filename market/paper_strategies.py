@@ -52,8 +52,8 @@ class StrategyRunner:
         allowed = {
             "price", "signal.score", "signal.bias", "signal.structure",
             "funding.average", "obi.composite_obi",
-            "support_resistance.state", "support_resistance.distance_to_support_pct",
-            "support_resistance.distance_to_resistance_pct",
+            "support_resistance.state", "support_resistance.support_distance_pct",
+            "support_resistance.resistance_distance_pct",
             "liquidation.state", "liquidation.imbalance",
             "liquidation.total_liquidation_usd", "liquidation.recent_5m_liquidation_usd",
         }

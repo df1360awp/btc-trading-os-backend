@@ -133,6 +133,13 @@ def test_system_strategy_can_gate_existing_signal_with_market_confluence(engine)
     assert runner.on_signal(100, signal, context)["opened"] == 1
 
 
+def test_strategy_conditions_use_actual_support_resistance_context_fields(engine):
+    engine.create_account(AccountRequest(account_id="levels",strategy_type="USER",strategy_id="levels"),"levels",Decimal("100"))
+    runner=StrategyRunner(engine)
+    runner.create("USER", {"id":"levels","account_id":"levels","direction":"LONG","entry_price":"100","entry_when":"AT_OR_ABOVE","quantity":"1","conditions":[{"field":"support_resistance.support_distance_pct","op":"LTE","value":"1"}]})
+    assert runner.on_market(100,{"price":100,"support_resistance":{"support_distance_pct":0.5}})["opened"] == 1
+
+
 def test_strategy_can_pause_and_delete_without_open_position(engine):
     engine.create_account(AccountRequest(account_id="managed",strategy_type="USER",strategy_id="m"),"managed",Decimal("100"))
     runner=StrategyRunner(engine)
