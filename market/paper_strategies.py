@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from market.paper_trading import EntryRequest, PaperEngine, PaperError, connect
+from market.paper_trading import EntryRequest, PaperEngine, PaperError, amount, connect
 
 
 class Model(BaseModel):
@@ -80,7 +80,8 @@ class StrategyRunner:
             d = SystemStrategy.model_validate(row["definition"]); score = signal.get("score",0); bias = signal.get("bias")
             direction = "LONG" if bias == "BULLISH" else "SHORT" if bias == "BEARISH" else None
             if not direction or abs(score) < d.min_abs_score or self.engine.records(d.account_id,"positions"): continue
-            stop = price-d.stop_distance if direction == "LONG" else price+d.stop_distance; take = price+d.take_distance if direction == "LONG" else price-d.take_distance
+            stop = Decimal(amount(price-d.stop_distance if direction == "LONG" else price+d.stop_distance))
+            take = Decimal(amount(price+d.take_distance if direction == "LONG" else price-d.take_distance))
             order = self.engine.enter(d.account_id,EntryRequest(direction=direction,quantity=d.quantity,stop_loss=stop,take_profit=take),"system:"+d.id+":"+str(self.engine.clock()),price)
             if order["status"] == "FILLED": self.event(d.id,order["position_id"],"SIGNAL_ENTRY",{**context,"signal":signal}); opened += 1
         return {"opened":opened}
