@@ -245,6 +245,32 @@ def save_snapshot(results):
     conn.close()
 
 
+def support_resistance(price, lookback_minutes=240):
+    """Derive conservative key levels from existing multi-exchange snapshots.
+
+    This is deliberately not presented as a liquidation heatmap: it is an
+    explainable price-structure input until a permitted liquidation feed exists.
+    """
+    conn = sqlite3.connect(DB_PATH, timeout=10)
+    conn.execute("PRAGMA busy_timeout=10000")
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=lookback_minutes)).isoformat()
+    rows = conn.execute("SELECT price FROM market_snapshots WHERE timestamp>=?", (cutoff,)).fetchall()
+    conn.close()
+    values = sorted({float(row[0]) for row in rows if row[0] > 0})
+    below = [value for value in values if value < price]
+    above = [value for value in values if value > price]
+    support = below[-1] if below else min(values, default=None)
+    resistance = above[0] if above else max(values, default=None)
+    return {
+        "lookback_minutes": lookback_minutes,
+        "support": support,
+        "resistance": resistance,
+        "support_distance_pct": ((price - support) / price * 100) if support else None,
+        "resistance_distance_pct": ((resistance - price) / price * 100) if resistance else None,
+        "state": "BREAKOUT" if resistance is None and values else "BREAKDOWN" if support is None and values else "IN_RANGE",
+    }
+
+
 async def collect_market_snapshot():
     results, errors = await fetch_market()
 
@@ -259,7 +285,7 @@ async def collect_market_snapshot():
         # B consumes the existing Signal Engine's output; it never changes its rules.
         changes = {exchange: {label: get_change(exchange, minutes) for label, minutes in {"5m":5,"30m":30,"1h":60,"4h":240}.items()} for exchange in ["binance","bybit","okx"]}
         signal = build_signal(changes, get_all_cvd_windows(), await fetch_all_obi(), {"average": sum(x["funding_rate"] for x in results) / len(results)})
-        enriched_context = {**context, "signal": signal, "funding": {"average": sum(x["funding_rate"] for x in results) / len(results)}}
+        enriched_context = {**context, "signal": signal, "funding": {"average": sum(x["funding_rate"] for x in results) / len(results)}, "support_resistance": support_resistance(price)}
         strategies.on_market(price, enriched_context)
         strategies.on_signal(price, signal, enriched_context)
 
