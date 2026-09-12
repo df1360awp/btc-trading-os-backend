@@ -9,6 +9,7 @@ from market.journal import ImageRequest, JournalEntryRequest, JournalStore, init
 from market.ai_review import ReviewService
 from market.macro import MacroEvent, MacroRelease, MacroStore, init_macro_tables
 from market.market_analysis import MarketAnalysisService
+from market.macro_analysis import MacroAnalysisService
 
 
 @pytest.fixture
@@ -204,3 +205,8 @@ def test_market_ai_explains_context_without_becoming_executor():
     result=service.explain({"signal_engine":{"signal":{"bias":"BULLISH"}},"liquidation":{"state":"BALANCED"}})
     assert result["analysis"] == "市场解释"
     assert result["model"] == "test-model"
+
+
+def test_macro_ai_explains_release_without_becoming_executor():
+    result=MacroAnalysisService(requester=lambda prompt, image:("宏观解释","test-model")).explain({"event":{"actual":"2.9%","forecast":"3%"}})
+    assert result["analysis"] == "宏观解释"

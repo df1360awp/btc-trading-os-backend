@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, Query
 from market.macro import MacroEvent, MacroRelease, MacroStore
 from market.fcm_sender import send_to_active_devices
 from market.paper_trading import require_paper_key
+from market.macro_analysis import MacroAnalysisService
 store=MacroStore("/opt/btc-trading-os/market.db")
 router=APIRouter(prefix="/macro",tags=["Macro Intelligence"],dependencies=[Depends(require_paper_key)])
 @router.post("/events",status_code=201)
@@ -14,3 +15,5 @@ def release(event_id:str, request:MacroRelease):
     try: send_to_active_devices({"alert_type":"MACRO_RELEASE","event_id":event_id,"macro_type":event["event_type"],"actual":event["actual"],"forecast":event["forecast"],"previous":event["previous"],"message":f"{event['title']} 已公布：{event['actual']}"})
     except Exception: pass
     return {"event":event,"impact_context":store.impact_context(event_id)}
+@router.post("/events/{event_id}/analysis")
+def analyze(event_id:str): return MacroAnalysisService().explain(store.impact_context(event_id))
