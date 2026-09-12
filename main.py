@@ -25,6 +25,8 @@ from market.market_analysis import MarketAnalysisService
 from market.research_context import compose_research_context
 from market.journal import JournalStore
 from market.data_health import market_data_health
+from market.app_auth import init_app_sessions
+from market.app_api import router as app_router
 from market.paper_trading import require_paper_key
 
 app = FastAPI(title="BTC Trading OS API")
@@ -34,6 +36,7 @@ app.include_router(fcm_router)
 app.include_router(paper_router)
 app.include_router(journal_router)
 app.include_router(macro_router)
+app.include_router(app_router)
 
 
 @app.exception_handler(PaperError)
@@ -102,6 +105,7 @@ def init_db():
     init_paper_tables(DB_PATH)
     init_journal_tables(DB_PATH)
     init_macro_tables(DB_PATH)
+    init_app_sessions(DB_PATH)
 
 
 async def fetch_binance(client):

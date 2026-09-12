@@ -12,6 +12,7 @@ from market.market_analysis import MarketAnalysisService
 from market.macro_analysis import MacroAnalysisService
 from market.research_context import compose_research_context
 from market.data_health import market_data_health
+from market.app_auth import init_app_sessions, issue_session
 
 
 @pytest.fixture
@@ -293,3 +294,14 @@ def test_market_data_health_marks_fresh_sources(tmp_path):
     result=market_data_health(str(db_path),now)
     assert result["market_status"] == "FRESH"
     assert result["liquidation_events"]["count"] == 1
+
+
+def test_registered_fcm_device_can_receive_separate_app_session(tmp_path):
+    db_path=tmp_path / "market.db"
+    with connect(str(db_path)) as db:
+        db.execute("CREATE TABLE fcm_devices(installation_id TEXT,token TEXT,active INTEGER)")
+        db.execute("INSERT INTO fcm_devices VALUES('device-1','fcm-token',1)")
+    init_app_sessions(str(db_path))
+    session=issue_session("fcm-token",str(db_path),now_ms=1_800_000_000_000)
+    assert session["access_token"]
+    assert session["expires_ms"] > 1_800_000_000_000

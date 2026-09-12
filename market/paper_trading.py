@@ -272,6 +272,5 @@ class PaperEngine:
 
 
 def require_paper_key(authorization: str | None = Header(default=None)):
-    expected=os.getenv("PAPER_API_KEY")
-    if not expected: raise HTTPException(status_code=503,detail="Paper Trading API is not configured")
-    if authorization != f"Bearer {expected}": raise HTTPException(status_code=401,detail="Invalid Paper Trading API credential",headers={"WWW-Authenticate":"Bearer"})
+    from market.app_auth import require_device_or_paper
+    return require_device_or_paper(authorization)
