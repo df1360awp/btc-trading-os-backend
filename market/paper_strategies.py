@@ -31,6 +31,7 @@ class SystemStrategy(Model):
     quantity: Decimal = Field(gt=0)
     stop_distance: Decimal = Field(gt=0)
     take_distance: Decimal = Field(gt=0)
+    cooldown_seconds: int = Field(default=300, ge=0, le=86400)
 
 
 class StrategyRunner:
@@ -53,7 +54,11 @@ class StrategyRunner:
         with connect(self.engine.db_path) as db:
             row = db.execute("SELECT * FROM paper_strategies WHERE id=?", (strategy_id,)).fetchone()
             if not row: raise PaperError("NOT_FOUND", "Strategy not found", 404)
-            result = dict(row); result["enabled"] = bool(result["enabled"]); result["definition"] = json.loads(result["definition"]); return result
+            result = dict(row); result["enabled"] = bool(result["enabled"]); result["definition"] = json.loads(result["definition"]); result["state"] = json.loads(result["state"]); return result
+
+    def save_state(self, strategy_id, state):
+        with connect(self.engine.db_path) as db:
+            db.execute("UPDATE paper_strategies SET state=?,updated_ms=? WHERE id=?", (json.dumps(state,sort_keys=True),self.engine.clock(),strategy_id))
 
     def list(self, route):
         with connect(self.engine.db_path) as db: rows = db.execute("SELECT * FROM paper_strategies WHERE route=? AND enabled=1", (route,)).fetchall()
@@ -79,9 +84,14 @@ class StrategyRunner:
         for row in self.list("SYSTEM"):
             d = SystemStrategy.model_validate(row["definition"]); score = signal.get("score",0); bias = signal.get("bias")
             direction = "LONG" if bias == "BULLISH" else "SHORT" if bias == "BEARISH" else None
-            if not direction or abs(score) < d.min_abs_score or self.engine.records(d.account_id,"positions"): continue
+            fingerprint = f"{direction}:{score}:{signal.get('structure')}"; state = row["state"]
+            cooling = self.engine.clock() - state.get("last_entry_ms", 0) < d.cooldown_seconds * 1000
+            if not direction or abs(score) < d.min_abs_score or cooling or self.engine.records(d.account_id,"positions"): continue
             stop = Decimal(amount(price-d.stop_distance if direction == "LONG" else price+d.stop_distance))
             take = Decimal(amount(price+d.take_distance if direction == "LONG" else price-d.take_distance))
             order = self.engine.enter(d.account_id,EntryRequest(direction=direction,quantity=d.quantity,stop_loss=stop,take_profit=take),"system:"+d.id+":"+str(self.engine.clock()),price)
-            if order["status"] == "FILLED": self.event(d.id,order["position_id"],"SIGNAL_ENTRY",{**context,"signal":signal}); opened += 1
+            if order["status"] == "FILLED":
+                self.event(d.id,order["position_id"],"SIGNAL_ENTRY",{**context,"signal":signal})
+                self.save_state(d.id,{"last_entry_ms":self.engine.clock(),"last_signal":fingerprint,"last_direction":direction})
+                opened += 1
         return {"opened":opened}
