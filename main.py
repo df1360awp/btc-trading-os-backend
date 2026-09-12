@@ -48,6 +48,22 @@ async def check_macro_reminders():
         print("Macro reminder error:", repr(error))
 
 
+async def notify_paper_activity(price, marked, user_result, system_result):
+    opened = user_result["opened"] + system_result["opened"]
+    closed = marked["closed_positions"] + user_result["closed"]
+    if not opened and not closed:
+        return
+    payload = {
+        "alert_type": "PAPER_TRADE", "price": round(price, 2),
+        "opened": opened, "closed": closed,
+        "message": f"Paper Trading: 开仓 {opened}，平仓 {closed}，BTC {price:.2f}",
+    }
+    try:
+        await asyncio.to_thread(send_to_active_devices, payload)
+    except Exception as error:
+        print("Paper FCM notification error:", repr(error))
+
+
 def init_db():
     conn = sqlite3.connect(DB_PATH, timeout=10)
     conn.execute("PRAGMA busy_timeout=10000")
@@ -300,14 +316,15 @@ async def collect_market_snapshot():
         # It cannot submit a real-exchange order.
         from market.paper_api import engine, strategies
         price = sum(item["price"] for item in results) / len(results)
-        engine.mark(price)
+        marked = engine.mark(price)
         context = {"price": price, "sources": results}
         # B consumes the existing Signal Engine's output; it never changes its rules.
         changes = {exchange: {label: get_change(exchange, minutes) for label, minutes in {"5m":5,"30m":30,"1h":60,"4h":240}.items()} for exchange in ["binance","bybit","okx"]}
         signal = build_signal(changes, get_all_cvd_windows(), await fetch_all_obi(), {"average": sum(x["funding_rate"] for x in results) / len(results)})
         enriched_context = {**context, "signal": signal, "funding": {"average": sum(x["funding_rate"] for x in results) / len(results)}, "support_resistance": support_resistance(price), "liquidation": liquidation_pressure()}
-        strategies.on_market(price, enriched_context)
-        strategies.on_signal(price, signal, enriched_context)
+        user_result = strategies.on_market(price, enriched_context)
+        system_result = strategies.on_signal(price, signal, enriched_context)
+        await notify_paper_activity(price, marked, user_result, system_result)
 
     if errors:
         print("snapshot errors:", errors)
