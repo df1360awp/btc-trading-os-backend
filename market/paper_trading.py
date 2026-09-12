@@ -247,6 +247,14 @@ class PaperEngine:
     def account(self,account_id,mark_price):
         with connect(self.db_path) as db: return self._value(db,account_id,Decimal(str(mark_price)))
 
+    def accounts(self, mark_price):
+        with connect(self.db_path) as db: ids=[row["id"] for row in db.execute("SELECT id FROM paper_accounts ORDER BY id").fetchall()]
+        return [self.account(account_id, mark_price) for account_id in ids]
+
+    def dashboard(self, mark_price):
+        accounts=self.accounts(mark_price)
+        return {"accounts":accounts,"totals":{"equity":amount(sum((Decimal(str(item["equity"])) for item in accounts),ZERO)),"open_positions":sum(len(self.records(item["id"],"positions")) for item in accounts)}}
+
     def records(self,account_id,kind,limit=100):
         tables={"orders":"paper_orders","positions":"paper_positions","trades":"paper_positions","equity":"paper_equity"}
         if kind not in tables: raise PaperError("NOT_FOUND","Record type not found",404)

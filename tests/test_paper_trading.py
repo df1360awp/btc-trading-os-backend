@@ -38,6 +38,13 @@ def test_long_short_lifecycle(engine,direction,exit,pnl):
     assert Decimal(engine.account("user",Decimal(str(exit)))["balance"]) == 10000 + Decimal(str(pnl))
 
 
+def test_dashboard_aggregates_virtual_accounts(engine):
+    engine.create_account(AccountRequest(account_id="second",strategy_type="SYSTEM",strategy_id="b",initial_balance="50"),"second",Decimal("100"))
+    result=engine.dashboard(Decimal("100"))
+    assert len(result["accounts"]) == 2
+    assert Decimal(result["totals"]["equity"]) == Decimal("10050")
+
+
 def test_fees_slippage_stop_tp_and_gap(engine):
     engine.create_account(AccountRequest(account_id="system",strategy_type="SYSTEM",strategy_id="b",fee_bps="10",slippage_bps="10"),"system",Decimal("100"))
     order=engine.enter("system",EntryRequest(direction="LONG",quantity="2",stop_loss="90",take_profit="120"),"entry",Decimal("100"))

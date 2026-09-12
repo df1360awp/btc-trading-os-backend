@@ -35,6 +35,14 @@ def create_account(request: AccountRequest, idempotency_key: str = Depends(key))
 def account(account_id: str): return engine.account(account_id,mark_price())
 
 
+@router.get("/accounts")
+def accounts(): return engine.accounts(mark_price())
+
+
+@router.get("/dashboard")
+def dashboard(): return engine.dashboard(mark_price())
+
+
 @router.post("/accounts/{account_id}/orders",status_code=201)
 def enter(account_id: str,request: EntryRequest,idempotency_key: str = Depends(key)):
     return engine.enter(account_id,request,idempotency_key,mark_price())
