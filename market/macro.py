@@ -20,6 +20,14 @@ class MacroRelease(Model):
     actual: str = Field(min_length=1, max_length=100)
 
 
+class MacroUpdate(Model):
+    title: str = Field(min_length=2, max_length=200)
+    event_type: str = Field(pattern=r"^(CPI|CORE_CPI|PPI|PCE|CORE_PCE|NFP|ADP|JOBLESS_CLAIMS|GDP|ISM|FOMC|FED_SPEECH|OTHER)$")
+    scheduled_ms: int = Field(gt=0)
+    forecast: str | None = Field(default=None, max_length=100)
+    previous: str | None = Field(default=None, max_length=100)
+
+
 def init_macro_tables(db_path):
     with connect(db_path) as db: db.executescript("""
       CREATE TABLE IF NOT EXISTS macro_events(id TEXT PRIMARY KEY,title TEXT NOT NULL,event_type TEXT NOT NULL,scheduled_ms INTEGER NOT NULL,forecast TEXT,previous TEXT,actual TEXT,created_ms INTEGER NOT NULL);
@@ -42,6 +50,18 @@ class MacroStore:
     def list(self, limit=100):
         with connect(self.db_path) as db: rows=db.execute("SELECT * FROM macro_events ORDER BY scheduled_ms LIMIT ?",(limit,)).fetchall()
         return [dict(x) for x in rows]
+    def update(self, event_id, request):
+        event=self.get(event_id)
+        if event["actual"] is not None: raise PaperError("MACRO_RELEASED", "Released macro events cannot be edited", 422)
+        with connect(self.db_path) as db:
+            db.execute("UPDATE macro_events SET title=?,event_type=?,scheduled_ms=?,forecast=?,previous=? WHERE id=?", (*request.model_dump().values(),event_id))
+        return self.get(event_id)
+    def delete(self, event_id):
+        event=self.get(event_id)
+        if event["actual"] is not None: raise PaperError("MACRO_RELEASED", "Released macro events cannot be deleted", 422)
+        with connect(self.db_path) as db:
+            db.execute("DELETE FROM macro_reminders WHERE event_id=?",(event_id,)); db.execute("DELETE FROM macro_events WHERE id=?",(event_id,))
+        return {"id":event_id,"deleted":True}
     def release(self, event_id, request):
         self.get(event_id)
         with connect(self.db_path) as db:

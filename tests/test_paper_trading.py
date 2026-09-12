@@ -7,7 +7,7 @@ from market.paper_strategies import StrategyRunner
 from market.liquidation import liquidation_pressure
 from market.journal import ImageRequest, JournalEntryRequest, JournalStore, init_journal_tables
 from market.ai_review import ReviewService
-from market.macro import MacroEvent, MacroRelease, MacroStore, init_macro_tables
+from market.macro import MacroEvent, MacroRelease, MacroStore, MacroUpdate, init_macro_tables
 from market.market_analysis import MarketAnalysisService
 from market.macro_analysis import MacroAnalysisService
 from market.research_context import compose_research_context
@@ -252,6 +252,13 @@ def test_macro_release_keeps_actual_and_market_context(tmp_path):
     event=store.create(MacroEvent(title="US CPI",event_type="CPI",scheduled_ms=1_800_000_000_000,forecast="3%",previous="3.1%"))
     assert store.release(event["id"],MacroRelease(actual="2.9%"))["actual"] == "2.9%"
     assert store.impact_context(event["id"])["event"]["forecast"] == "3%"
+
+
+def test_macro_event_can_update_or_delete_before_release(tmp_path):
+    db_path=tmp_path / "market.db"; init_macro_tables(str(db_path)); store=MacroStore(str(db_path))
+    event=store.create(MacroEvent(title="US CPI",event_type="CPI",scheduled_ms=1_800_000_000_000))
+    assert store.update(event["id"],MacroUpdate(title="US Core CPI",event_type="CORE_CPI",scheduled_ms=1_800_000_100_000))["event_type"] == "CORE_CPI"
+    assert store.delete(event["id"]) == {"id":event["id"],"deleted":True}
 
 
 def test_market_ai_explains_context_without_becoming_executor():

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, Query
-from market.macro import MacroEvent, MacroRelease, MacroStore
+from market.macro import MacroEvent, MacroRelease, MacroStore, MacroUpdate
 from market.fcm_sender import send_to_active_devices
 from market.paper_trading import require_paper_key
 from market.macro_analysis import MacroAnalysisService
@@ -9,6 +9,12 @@ router=APIRouter(prefix="/macro",tags=["Macro Intelligence"],dependencies=[Depen
 def create(request:MacroEvent): return store.create(request)
 @router.get("/events")
 def list_events(limit:int=Query(default=100,ge=1,le=500)): return store.list(limit)
+@router.get("/events/{event_id}")
+def get_event(event_id:str): return store.get(event_id)
+@router.put("/events/{event_id}")
+def update(event_id:str, request:MacroUpdate): return store.update(event_id,request)
+@router.delete("/events/{event_id}")
+def delete(event_id:str): return store.delete(event_id)
 @router.put("/events/{event_id}/release")
 def release(event_id:str, request:MacroRelease):
     event=store.release(event_id,request)
