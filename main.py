@@ -256,11 +256,12 @@ async def collect_market_snapshot():
         price = sum(item["price"] for item in results) / len(results)
         engine.mark(price)
         context = {"price": price, "sources": results}
-        strategies.on_market(price, context)
         # B consumes the existing Signal Engine's output; it never changes its rules.
         changes = {exchange: {label: get_change(exchange, minutes) for label, minutes in {"5m":5,"30m":30,"1h":60,"4h":240}.items()} for exchange in ["binance","bybit","okx"]}
         signal = build_signal(changes, get_all_cvd_windows(), await fetch_all_obi(), {"average": sum(x["funding_rate"] for x in results) / len(results)})
-        strategies.on_signal(price, signal, {**context, "signal": signal})
+        enriched_context = {**context, "signal": signal, "funding": {"average": sum(x["funding_rate"] for x in results) / len(results)}}
+        strategies.on_market(price, enriched_context)
+        strategies.on_signal(price, signal, enriched_context)
 
     if errors:
         print("snapshot errors:", errors)

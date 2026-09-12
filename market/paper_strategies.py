@@ -22,6 +22,7 @@ class UserStrategy(Model):
     take_profit: Decimal | None = Field(default=None, gt=0)
     exit_price: Decimal | None = Field(default=None, gt=0)
     exit_when: str | None = Field(default=None, pattern=r"^(AT_OR_ABOVE|AT_OR_BELOW)$")
+    conditions: list[dict] = Field(default_factory=list, max_length=12)
 
 
 class SystemStrategy(Model):
@@ -38,6 +39,21 @@ class StrategyRunner:
     def __init__(self, engine: PaperEngine): self.engine = engine
     @staticmethod
     def hit(price, target, rule): return price >= target if rule == "AT_OR_ABOVE" else price <= target
+    @staticmethod
+    def conditions_match(conditions, context):
+        """Small allowlisted condition DSL; missing/stale fields never trigger a trade."""
+        allowed = {"price", "signal.score", "signal.bias", "signal.structure", "funding.average", "obi.composite_obi"}
+        for item in conditions:
+            field, op, expected = item.get("field"), item.get("op"), item.get("value")
+            if field not in allowed or op not in {"EQ","GTE","LTE"}: raise PaperError("INVALID_CONDITION","Unsupported strategy condition",422)
+            actual = context
+            for part in field.split("."):
+                actual = actual.get(part) if isinstance(actual,dict) else None
+            if actual is None: return False
+            if op == "EQ" and actual != expected: return False
+            if op == "GTE" and Decimal(str(actual)) < Decimal(str(expected)): return False
+            if op == "LTE" and Decimal(str(actual)) > Decimal(str(expected)): return False
+        return True
 
     def create(self, route, payload):
         cls = UserStrategy if route == "USER" else SystemStrategy
@@ -72,7 +88,7 @@ class StrategyRunner:
         price = Decimal(str(price)); opened = closed = 0
         for row in self.list("USER"):
             d = UserStrategy.model_validate(row["definition"]); positions = self.engine.records(d.account_id,"positions")
-            if not positions and self.hit(price,d.entry_price,d.entry_when):
+            if not positions and self.hit(price,d.entry_price,d.entry_when) and self.conditions_match(d.conditions,context):
                 order = self.engine.enter(d.account_id,EntryRequest(direction=d.direction,quantity=d.quantity,stop_loss=d.stop_loss,take_profit=d.take_profit),"user:"+d.id+":"+str(self.engine.clock()),price)
                 if order["status"] == "FILLED": self.event(d.id,order["position_id"],"ENTRY",context); opened += 1
             elif positions and d.exit_price is not None and self.hit(price,d.exit_price,d.exit_when):

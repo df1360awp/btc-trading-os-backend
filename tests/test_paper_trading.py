@@ -90,5 +90,13 @@ def test_user_strategy_and_system_signal_adapter_share_engine(engine):
     runner.create("SYSTEM",{"id":"b","account_id":"b-route","quantity":"1","stop_distance":"10","take_distance":"20"})
     assert runner.on_signal(105,{"score":3,"bias":"BULLISH"},{"price":105})["opened"] == 1
     assert engine.records("b-route","positions")[0]["direction"] == "LONG"
+
+
+def test_user_strategy_conditions_require_current_market_context(engine):
+    engine.create_account(AccountRequest(account_id="conditional",strategy_type="USER",strategy_id="c"),"conditional",Decimal("100"))
+    runner=StrategyRunner(engine)
+    runner.create("USER",{"id":"conditional","account_id":"conditional","direction":"LONG","entry_price":"100","entry_when":"AT_OR_ABOVE","quantity":"1","conditions":[{"field":"signal.score","op":"GTE","value":3},{"field":"signal.bias","op":"EQ","value":"BULLISH"}]})
+    assert runner.on_market(100,{"price":100,"signal":{"score":2,"bias":"BULLISH"}})["opened"] == 0
+    assert runner.on_market(100,{"price":100,"signal":{"score":3,"bias":"BULLISH"}})["opened"] == 1
     with connect(engine.db_path) as db:
-        assert db.execute("SELECT COUNT(*) FROM paper_strategy_events").fetchone()[0] == 2
+        assert db.execute("SELECT COUNT(*) FROM paper_strategy_events").fetchone()[0] == 1
