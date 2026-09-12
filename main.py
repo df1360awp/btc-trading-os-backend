@@ -24,6 +24,7 @@ from market.fcm_sender import send_to_active_devices
 from market.market_analysis import MarketAnalysisService
 from market.research_context import compose_research_context
 from market.journal import JournalStore
+from market.data_health import market_data_health
 from market.paper_trading import require_paper_key
 
 app = FastAPI(title="BTC Trading OS API")
@@ -628,6 +629,10 @@ async def btc_research_context():
     state, signal = await asyncio.gather(btc_state(), btc_signal())
     price = state["price"]["average"]
     return compose_research_context(state, signal, support_resistance(price) if price else {}, liquidation_pressure())
+
+
+@app.get("/market/btc/data-health")
+async def btc_data_health(): return market_data_health(DB_PATH)
 
 
 @app.post("/ai/market-analysis", dependencies=[Depends(require_paper_key)])

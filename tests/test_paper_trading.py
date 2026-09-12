@@ -11,6 +11,7 @@ from market.macro import MacroEvent, MacroRelease, MacroStore, MacroUpdate, init
 from market.market_analysis import MarketAnalysisService
 from market.macro_analysis import MacroAnalysisService
 from market.research_context import compose_research_context
+from market.data_health import market_data_health
 
 
 @pytest.fixture
@@ -280,3 +281,15 @@ def test_research_context_exposes_existing_market_layers():
     result=compose_research_context({"price":{"average":100},"open_interest":{},"funding":{},"cvd":{},"obi":{},"errors":{}},{"signal":{"bias":"BULLISH"},"price_changes":{}},{"state":"IN_RANGE"},{"state":"BALANCED"})
     assert result["signal_engine"]["bias"] == "BULLISH"
     assert result["liquidation"]["state"] == "BALANCED"
+
+
+def test_market_data_health_marks_fresh_sources(tmp_path):
+    db_path=tmp_path / "market.db"; now=1_800_000_000_000
+    with connect(str(db_path)) as db:
+        db.execute("CREATE TABLE market_snapshots(exchange TEXT,timestamp TEXT)")
+        db.execute("CREATE TABLE liquidation_events(timestamp_ms INTEGER)")
+        db.execute("INSERT INTO market_snapshots VALUES('binance','2027-01-15T08:00:00+00:00')")
+        db.execute("INSERT INTO liquidation_events VALUES(?)",(now-1000,))
+    result=market_data_health(str(db_path),now)
+    assert result["market_status"] == "FRESH"
+    assert result["liquidation_events"]["count"] == 1
