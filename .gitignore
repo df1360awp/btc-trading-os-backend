@@ -1,0 +1,37 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environment
+venv/
+
+# Secrets
+secrets/
+*.env
+
+# Logs
+*.log
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE
+.idea/
+.vscode/
+
+# Backup files
+*.bak
+*.save
+*.before-alert-monitor
+
+# Temporary files
+tmp/
+
+# OS files
+.DS_Store
+
+# More backup files
+*.bak*
