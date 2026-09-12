@@ -35,6 +35,10 @@ def remove_image(entry_id: str): return store.remove_image(entry_id)
 def import_paper(account_id: str, limit: int = Query(default=100, ge=1, le=500)): return store.import_paper_trades(engine, account_id, limit)
 
 
+@router.get("/summary")
+def journal_summary(start_ms: int | None = None, end_ms: int | None = None): return store.summary(start_ms, end_ms)
+
+
 @router.post("/entries/{entry_id}/reviews", status_code=201)
 def review_entry(entry_id: str): return reviews.create_entry_review(entry_id)
 

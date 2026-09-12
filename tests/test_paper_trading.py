@@ -202,6 +202,7 @@ def test_journal_syncs_all_paper_accounts(engine, tmp_path):
     init_journal_tables(engine.db_path)
     journal=JournalStore(engine.db_path,tmp_path / "uploads",clock=lambda:1_800_000_000_000)
     assert len(journal.import_all_paper_trades(engine,Decimal("101"))) == 1
+    assert journal.summary()["paper_pnl"] > 0
 
 
 def test_ai_review_persists_entry_result_without_network(tmp_path):

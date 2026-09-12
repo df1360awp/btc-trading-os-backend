@@ -127,6 +127,18 @@ class JournalStore:
             imported.extend(self.import_paper_trades(engine, account["account_id"]))
         return imported
 
+    def summary(self, start_ms=None, end_ms=None):
+        clauses, params = [], []
+        if start_ms is not None: clauses.append("j.occurred_ms>=?"); params.append(start_ms)
+        if end_ms is not None: clauses.append("j.occurred_ms<=?"); params.append(end_ms)
+        where = " WHERE " + " AND ".join(clauses) if clauses else ""
+        with connect(self.db_path) as db:
+            rows=db.execute("""SELECT j.source,j.side,j.psychology,p.profit_loss
+                FROM journal_entries j LEFT JOIN paper_positions p ON p.id=j.paper_position_id""" + where, params).fetchall()
+        paper=[float(row["profit_loss"]) for row in rows if row["profit_loss"] is not None]
+        wins=[value for value in paper if value>0]
+        return {"entry_count":len(rows),"paper_trade_count":len(paper),"paper_pnl":sum(paper),"paper_wins":len(wins),"paper_win_rate":len(wins)/len(paper) if paper else 0,"psychology_coverage":sum(bool(row["psychology"].strip()) for row in rows)/len(rows) if rows else 0,"by_source":{source:sum(row["source"]==source for row in rows) for source in ("MANUAL","PAPER_USER","PAPER_SYSTEM")},"by_side":{side:sum(row["side"]==side for row in rows) for side in ("LONG","SHORT")}}
+
     def _remove_private_file(self, value):
         path = Path(value)
         if path.parent == self.upload_dir and path.is_file(): path.unlink()
