@@ -26,6 +26,10 @@ def get_entry(entry_id: str): return store.get(entry_id)
 def attach_image(entry_id: str, request: ImageRequest): return store.attach_image(entry_id, request)
 
 
+@router.delete("/entries/{entry_id}/image")
+def remove_image(entry_id: str): return store.remove_image(entry_id)
+
+
 @router.post("/entries/{entry_id}/reviews", status_code=201)
 def review_entry(entry_id: str): return reviews.create_entry_review(entry_id)
 
@@ -36,3 +40,7 @@ def review_period(period: str, end_ms: int | None = None): return reviews.create
 
 @router.get("/reviews/{review_id}")
 def get_review(review_id: str): return reviews.get(review_id)
+
+
+@router.get("/reviews")
+def list_reviews(entry_id: str | None = None, limit: int = Query(default=100, ge=1, le=500)): return reviews.list(entry_id, limit)

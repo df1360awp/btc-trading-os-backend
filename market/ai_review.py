@@ -65,6 +65,14 @@ class ReviewService:
         if not row: raise PaperError("NOT_FOUND", "Journal review not found", 404)
         return dict(row)
 
+    def list(self, entry_id=None, limit=100):
+        query, params = "SELECT * FROM journal_reviews", []
+        if entry_id:
+            query += " WHERE entry_id=?"; params.append(entry_id)
+        query += " ORDER BY created_ms DESC LIMIT ?"; params.append(limit)
+        with connect(self.db_path) as db: rows = db.execute(query, params).fetchall()
+        return [dict(row) for row in rows]
+
     def _request(self, prompt, image):
         key, model = os.getenv("OPENAI_API_KEY"), os.getenv("OPENAI_REVIEW_MODEL")
         if not key or not model: raise PaperError("AI_NOT_CONFIGURED", "Set OPENAI_API_KEY and OPENAI_REVIEW_MODEL in server secrets", 503)

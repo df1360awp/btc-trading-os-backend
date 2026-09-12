@@ -85,7 +85,7 @@ class JournalStore:
         return [dict(row) for row in rows]
 
     def attach_image(self, entry_id, request: ImageRequest):
-        self.get(entry_id)
+        previous = self.get(entry_id).get("image_path")
         try: raw = base64.b64decode(request.data_base64, validate=True)
         except ValueError as error: raise PaperError("INVALID_IMAGE", "Image must be base64 encoded", 422) from error
         if not raw or len(raw) > MAX_IMAGE_BYTES: raise PaperError("INVALID_IMAGE", "Image exceeds 10 MiB limit", 422)
@@ -96,4 +96,16 @@ class JournalStore:
         os.chmod(path, 0o600)
         with connect(self.db_path) as db:
             db.execute("UPDATE journal_entries SET image_path=?,updated_ms=? WHERE id=?", (str(path), self.clock(), entry_id))
+        if previous: self._remove_private_file(previous)
         return self.get(entry_id)
+
+    def remove_image(self, entry_id):
+        previous = self.get(entry_id).get("image_path")
+        with connect(self.db_path) as db:
+            db.execute("UPDATE journal_entries SET image_path=NULL,updated_ms=? WHERE id=?", (self.clock(), entry_id))
+        if previous: self._remove_private_file(previous)
+        return self.get(entry_id)
+
+    def _remove_private_file(self, value):
+        path = Path(value)
+        if path.parent == self.upload_dir and path.is_file(): path.unlink()

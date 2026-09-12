@@ -168,6 +168,7 @@ def test_journal_keeps_reason_psychology_and_private_image(tmp_path):
     result = journal.attach_image(entry["id"], ImageRequest(mime_type="image/png", data_base64="aW1hZ2U="))
     assert result["image_path"]
     assert (tmp_path / "uploads").exists()
+    assert journal.remove_image(entry["id"])["image_path"] is None
 
 
 def test_ai_review_persists_entry_result_without_network(tmp_path):
@@ -180,6 +181,7 @@ def test_ai_review_persists_entry_result_without_network(tmp_path):
     review = service.create_entry_review(entry["id"])
     assert review["status"] == "COMPLETED"
     assert review["analysis"] == "复盘结果"
+    assert service.list(entry["id"])[0]["id"] == review["id"]
 
 
 def test_macro_reminders_are_once_only(tmp_path):
