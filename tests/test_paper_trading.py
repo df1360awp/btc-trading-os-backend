@@ -10,6 +10,7 @@ from market.ai_review import ReviewService
 from market.macro import MacroEvent, MacroRelease, MacroStore, init_macro_tables
 from market.market_analysis import MarketAnalysisService
 from market.macro_analysis import MacroAnalysisService
+from market.research_context import compose_research_context
 
 
 @pytest.fixture
@@ -212,3 +213,9 @@ def test_market_ai_explains_context_without_becoming_executor():
 def test_macro_ai_explains_release_without_becoming_executor():
     result=MacroAnalysisService(requester=lambda prompt, image:("宏观解释","test-model")).explain({"event":{"actual":"2.9%","forecast":"3%"}})
     assert result["analysis"] == "宏观解释"
+
+
+def test_research_context_exposes_existing_market_layers():
+    result=compose_research_context({"price":{"average":100},"open_interest":{},"funding":{},"cvd":{},"obi":{},"errors":{}},{"signal":{"bias":"BULLISH"},"price_changes":{}},{"state":"IN_RANGE"},{"state":"BALANCED"})
+    assert result["signal_engine"]["bias"] == "BULLISH"
+    assert result["liquidation"]["state"] == "BALANCED"
