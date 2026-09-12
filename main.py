@@ -4,6 +4,7 @@ from datetime import datetime, timezone, timedelta
 
 import httpx
 from fastapi import Depends, FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from market.cvd import fetch_all_cvd
@@ -30,6 +31,17 @@ from market.app_api import router as app_router
 from market.paper_trading import require_paper_key
 
 app = FastAPI(title="BTC Trading OS API")
+
+# The Android client serves its bundled WebView from this fixed, local asset
+# origin.  It is the only browser origin permitted to call the existing API;
+# native clients continue to authenticate with their device session.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://appassets.androidplatform.net"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
+)
 
 app.include_router(alert_router)
 app.include_router(fcm_router)
