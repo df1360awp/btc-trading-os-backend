@@ -3,7 +3,7 @@ import sqlite3
 from datetime import datetime, timezone, timedelta
 
 import httpx
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from market.cvd import fetch_all_cvd
@@ -21,6 +21,8 @@ from market.journal_api import router as journal_router
 from market.macro import MacroStore, init_macro_tables
 from market.macro_api import router as macro_router
 from market.fcm_sender import send_to_active_devices
+from market.market_analysis import MarketAnalysisService
+from market.paper_trading import require_paper_key
 
 app = FastAPI(title="BTC Trading OS API")
 
@@ -594,6 +596,13 @@ async def btc_signal():
             "obi": obi.get("errors", [])
         }
     }
+
+
+@app.post("/ai/market-analysis", dependencies=[Depends(require_paper_key)])
+async def ai_market_analysis():
+    state, signal = await asyncio.gather(btc_state(), btc_signal())
+    context = {"market_state": state, "signal_engine": signal, "liquidation": liquidation_pressure()}
+    return await asyncio.to_thread(MarketAnalysisService().explain, context)
 
 # =========================
 # Automatic Price Alert Monitor

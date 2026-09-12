@@ -8,6 +8,7 @@ from market.liquidation import liquidation_pressure
 from market.journal import ImageRequest, JournalEntryRequest, JournalStore, init_journal_tables
 from market.ai_review import ReviewService
 from market.macro import MacroEvent, MacroStore, init_macro_tables
+from market.market_analysis import MarketAnalysisService
 
 
 @pytest.fixture
@@ -178,3 +179,10 @@ def test_macro_reminders_are_once_only(tmp_path):
     delivered=[]
     assert store.send_due(delivered.append, now) == [{"event_id":event["id"],"kind":"T24H"},{"event_id":event["id"],"kind":"T1H"}]
     assert store.send_due(delivered.append, now) == []
+
+
+def test_market_ai_explains_context_without_becoming_executor():
+    service=MarketAnalysisService(requester=lambda prompt, image: ("市场解释", "test-model"))
+    result=service.explain({"signal_engine":{"signal":{"bias":"BULLISH"}},"liquidation":{"state":"BALANCED"}})
+    assert result["analysis"] == "市场解释"
+    assert result["model"] == "test-model"
