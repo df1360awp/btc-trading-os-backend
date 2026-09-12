@@ -16,12 +16,15 @@ from market.alert_monitor import run_alert_monitor
 from market.liquidation import liquidation_pressure
 from market.paper_api import router as paper_router
 from market.paper_trading import PaperError, init_paper_tables
+from market.journal import init_journal_tables
+from market.journal_api import router as journal_router
 
 app = FastAPI(title="BTC Trading OS API")
 
 app.include_router(alert_router)
 app.include_router(fcm_router)
 app.include_router(paper_router)
+app.include_router(journal_router)
 
 
 @app.exception_handler(PaperError)
@@ -63,6 +66,7 @@ def init_db():
     conn.commit()
     conn.close()
     init_paper_tables(DB_PATH)
+    init_journal_tables(DB_PATH)
 
 
 async def fetch_binance(client):

@@ -5,6 +5,7 @@ import pytest
 from market.paper_trading import AccountRequest, EntryRequest, PaperEngine, PaperError, ProtectionRequest, connect
 from market.paper_strategies import StrategyRunner
 from market.liquidation import liquidation_pressure
+from market.journal import ImageRequest, JournalEntryRequest, JournalStore, init_journal_tables
 
 
 @pytest.fixture
@@ -143,3 +144,14 @@ def test_liquidation_pressure_uses_public_event_history(tmp_path):
     assert summary["recent_5m_liquidation_usd"] == 400
     assert summary["imbalance"] == pytest.approx(0.5)
     assert summary["state"] == "SHORT_SQUEEZE"
+
+
+def test_journal_keeps_reason_psychology_and_private_image(tmp_path):
+    db_path = tmp_path / "market.db"
+    init_journal_tables(str(db_path))
+    journal = JournalStore(str(db_path), tmp_path / "uploads", clock=lambda: 1_800_000_000_000)
+    entry = journal.create(JournalEntryRequest(source="MANUAL", occurred_ms=1_799_999_000_000, side="LONG", user_reason="breakout", psychology="FOMO"))
+    assert entry["user_reason"] == "breakout"
+    result = journal.attach_image(entry["id"], ImageRequest(mime_type="image/png", data_base64="aW1hZ2U="))
+    assert result["image_path"]
+    assert (tmp_path / "uploads").exists()
