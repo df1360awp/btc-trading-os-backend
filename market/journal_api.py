@@ -2,9 +2,11 @@
 from fastapi import APIRouter, Depends, Query
 
 from market.journal import ImageRequest, JournalEntryRequest, JournalStore
+from market.ai_review import ReviewService
 from market.paper_trading import require_paper_key
 
 store = JournalStore()
+reviews = ReviewService(store)
 router = APIRouter(prefix="/journal", tags=["Trading Journal"], dependencies=[Depends(require_paper_key)])
 
 
@@ -22,3 +24,15 @@ def get_entry(entry_id: str): return store.get(entry_id)
 
 @router.put("/entries/{entry_id}/image")
 def attach_image(entry_id: str, request: ImageRequest): return store.attach_image(entry_id, request)
+
+
+@router.post("/entries/{entry_id}/reviews", status_code=201)
+def review_entry(entry_id: str): return reviews.create_entry_review(entry_id)
+
+
+@router.post("/reviews/{period}", status_code=201)
+def review_period(period: str, end_ms: int | None = None): return reviews.create_period_review(period.upper(), end_ms)
+
+
+@router.get("/reviews/{review_id}")
+def get_review(review_id: str): return reviews.get(review_id)

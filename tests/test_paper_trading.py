@@ -6,6 +6,7 @@ from market.paper_trading import AccountRequest, EntryRequest, PaperEngine, Pape
 from market.paper_strategies import StrategyRunner
 from market.liquidation import liquidation_pressure
 from market.journal import ImageRequest, JournalEntryRequest, JournalStore, init_journal_tables
+from market.ai_review import ReviewService
 
 
 @pytest.fixture
@@ -155,3 +156,15 @@ def test_journal_keeps_reason_psychology_and_private_image(tmp_path):
     result = journal.attach_image(entry["id"], ImageRequest(mime_type="image/png", data_base64="aW1hZ2U="))
     assert result["image_path"]
     assert (tmp_path / "uploads").exists()
+
+
+def test_ai_review_persists_entry_result_without_network(tmp_path):
+    db_path = tmp_path / "market.db"; init_journal_tables(str(db_path))
+    with connect(str(db_path)) as db:
+        db.execute("CREATE TABLE market_snapshots(exchange TEXT, price REAL, open_interest REAL, oi_usd REAL, funding_rate REAL, timestamp TEXT)")
+    store = JournalStore(str(db_path), tmp_path / "uploads", clock=lambda: 1_800_000_000_000)
+    entry = store.create(JournalEntryRequest(source="MANUAL", occurred_ms=1_799_999_000_000, user_reason="test"))
+    service = ReviewService(store, str(db_path), clock=lambda: 1_800_000_001_000, requester=lambda prompt, image: ("复盘结果", "test-model"))
+    review = service.create_entry_review(entry["id"])
+    assert review["status"] == "COMPLETED"
+    assert review["analysis"] == "复盘结果"
