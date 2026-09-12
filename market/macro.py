@@ -16,6 +16,10 @@ class MacroEvent(Model):
     previous: str | None = Field(default=None, max_length=100)
 
 
+class MacroRelease(Model):
+    actual: str = Field(min_length=1, max_length=100)
+
+
 def init_macro_tables(db_path):
     with connect(db_path) as db: db.executescript("""
       CREATE TABLE IF NOT EXISTS macro_events(id TEXT PRIMARY KEY,title TEXT NOT NULL,event_type TEXT NOT NULL,scheduled_ms INTEGER NOT NULL,forecast TEXT,previous TEXT,actual TEXT,created_ms INTEGER NOT NULL);
@@ -38,6 +42,17 @@ class MacroStore:
     def list(self, limit=100):
         with connect(self.db_path) as db: rows=db.execute("SELECT * FROM macro_events ORDER BY scheduled_ms LIMIT ?",(limit,)).fetchall()
         return [dict(x) for x in rows]
+    def release(self, event_id, request):
+        self.get(event_id)
+        with connect(self.db_path) as db:
+            db.execute("UPDATE macro_events SET actual=? WHERE id=?", (request.actual, event_id))
+            row=db.execute("SELECT * FROM macro_events WHERE id=?", (event_id,)).fetchone()
+        return dict(row)
+    def impact_context(self, event_id):
+        event=self.get(event_id)
+        with connect(self.db_path) as db:
+            rows=db.execute("SELECT exchange,price,open_interest,oi_usd,funding_rate,timestamp FROM market_snapshots ORDER BY ABS(strftime('%s',timestamp)-?) LIMIT 3", (event["scheduled_ms"] // 1000,)).fetchall()
+        return {"event":event,"nearby_market_snapshots":[dict(row) for row in rows]}
     def due(self, now_ms):
         windows={"T24H":86400000,"T1H":3600000}; result=[]
         with connect(self.db_path) as db:

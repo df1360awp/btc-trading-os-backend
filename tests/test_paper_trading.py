@@ -7,7 +7,7 @@ from market.paper_strategies import StrategyRunner
 from market.liquidation import liquidation_pressure
 from market.journal import ImageRequest, JournalEntryRequest, JournalStore, init_journal_tables
 from market.ai_review import ReviewService
-from market.macro import MacroEvent, MacroStore, init_macro_tables
+from market.macro import MacroEvent, MacroRelease, MacroStore, init_macro_tables
 from market.market_analysis import MarketAnalysisService
 
 
@@ -188,6 +188,15 @@ def test_macro_reminders_are_once_only(tmp_path):
     delivered=[]
     assert store.send_due(delivered.append, now) == [{"event_id":event["id"],"kind":"T24H"},{"event_id":event["id"],"kind":"T1H"}]
     assert store.send_due(delivered.append, now) == []
+
+
+def test_macro_release_keeps_actual_and_market_context(tmp_path):
+    db_path=tmp_path / "market.db"; init_macro_tables(str(db_path))
+    with connect(str(db_path)) as db: db.execute("CREATE TABLE market_snapshots(exchange TEXT,price REAL,open_interest REAL,oi_usd REAL,funding_rate REAL,timestamp TEXT)")
+    store=MacroStore(str(db_path),clock=lambda:1_800_000_000_000)
+    event=store.create(MacroEvent(title="US CPI",event_type="CPI",scheduled_ms=1_800_000_000_000,forecast="3%",previous="3.1%"))
+    assert store.release(event["id"],MacroRelease(actual="2.9%"))["actual"] == "2.9%"
+    assert store.impact_context(event["id"])["event"]["forecast"] == "3%"
 
 
 def test_market_ai_explains_context_without_becoming_executor():
