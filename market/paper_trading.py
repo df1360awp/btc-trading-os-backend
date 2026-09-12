@@ -253,7 +253,7 @@ class PaperEngine:
 
     def dashboard(self, mark_price):
         accounts=self.accounts(mark_price)
-        return {"accounts":accounts,"totals":{"equity":amount(sum((Decimal(str(item["equity"])) for item in accounts),ZERO)),"open_positions":sum(len(self.records(item["id"],"positions")) for item in accounts)}}
+        return {"accounts":accounts,"totals":{"equity":amount(sum((Decimal(str(item["equity"])) for item in accounts),ZERO)),"open_positions":sum(len(self.records(item["account_id"],"positions")) for item in accounts)}}
 
     def records(self,account_id,kind,limit=100):
         tables={"orders":"paper_orders","positions":"paper_positions","trades":"paper_positions","equity":"paper_equity"}
