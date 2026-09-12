@@ -28,12 +28,47 @@ def init_trade_db():
     """)
 
     cursor.execute("""
-        CREATE INDEX IF NOT EXISTS idx_cvd_time
+            CREATE INDEX IF NOT EXISTS idx_cvd_time
         ON cvd_trades(exchange, timestamp_ms)
     """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS liquidation_events (
+            exchange TEXT NOT NULL, event_id TEXT NOT NULL,
+            timestamp_ms INTEGER NOT NULL, side TEXT NOT NULL,
+            price REAL NOT NULL, qty_btc REAL NOT NULL, notional_usd REAL NOT NULL,
+            PRIMARY KEY(exchange, event_id)
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_liquidation_time ON liquidation_events(timestamp_ms)")
 
     conn.commit()
     conn.close()
+
+
+def save_liquidation(event_id, timestamp_ms, side, price, qty_btc):
+    conn = sqlite3.connect(DB_PATH, timeout=10)
+    conn.execute("PRAGMA busy_timeout=10000")
+    conn.execute("""INSERT OR IGNORE INTO liquidation_events
+        VALUES ('binance',?,?,?,?,?,?)""", (str(event_id), int(timestamp_ms), side, float(price), float(qty_btc), float(price) * float(qty_btc)))
+    conn.commit(); conn.close()
+
+
+async def binance_liquidation_stream():
+    """Public force-order feed; records observed liquidations only."""
+    url = "wss://fstream.binance.com/ws/btcusdt@forceOrder"
+    while True:
+        try:
+            async with websockets.connect(url, ping_interval=20, ping_timeout=20) as ws:
+                async for message in ws:
+                    payload = json.loads(message); order = payload.get("o", {})
+                    if order.get("s") != "BTCUSDT": continue
+                    # SELL liquidation closes a long; BUY liquidation closes a short.
+                    side = "long_liquidation" if order.get("S") == "SELL" else "short_liquidation"
+                    price = order.get("ap") or order.get("p")
+                    if price and float(price) > 0:
+                        save_liquidation(order.get("i"), payload.get("E"), side, price, order.get("q"))
+        except Exception as e:
+            print("Binance liquidation WS error:", e); await asyncio.sleep(5)
 
 
 def save_trade(
@@ -257,6 +292,7 @@ async def run_cvd_streams():
 
     await asyncio.gather(
         binance_rest_stream(),
+        binance_liquidation_stream(),
         bybit_stream(),
         okx_stream()
     )
