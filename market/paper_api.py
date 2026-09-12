@@ -84,6 +84,10 @@ def get_strategy(strategy_id: str): return strategies.get(strategy_id)
 def set_strategy_enabled(strategy_id: str, request: StrategyEnabled): return strategies.set_enabled(strategy_id, request.enabled)
 
 
+@router.put("/strategy/{strategy_id}")
+def update_strategy(strategy_id: str, request: dict): return strategies.update(strategy_id, request)
+
+
 @router.delete("/strategy/{strategy_id}")
 def delete_strategy(strategy_id: str): return strategies.delete(strategy_id)
 

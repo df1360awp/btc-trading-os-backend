@@ -110,6 +110,16 @@ class StrategyRunner:
             db.execute("DELETE FROM paper_strategies WHERE id=?", (strategy_id,))
         return {"id": strategy_id, "deleted": True}
 
+    def update(self, strategy_id, payload):
+        row = self.get(strategy_id)
+        if self.engine.records(row["account_id"], "positions"):
+            raise PaperError("OPEN_POSITION", "Close the paper position before editing this strategy", 422)
+        cls = UserStrategy if row["route"] == "USER" else SystemStrategy
+        item = cls.model_validate({**payload, "id":strategy_id, "account_id":row["account_id"]})
+        with connect(self.engine.db_path) as db:
+            db.execute("UPDATE paper_strategies SET definition=?,updated_ms=? WHERE id=?", (item.model_dump_json(),self.engine.clock(),strategy_id))
+        return self.get(strategy_id)
+
     def event(self, strategy_id, position_id, event, context):
         with connect(self.engine.db_path) as db:
             db.execute("INSERT INTO paper_strategy_events(strategy_id,position_id,event,timestamp_ms,market_context) VALUES(?,?,?,?,?)", (strategy_id,position_id,event,self.engine.clock(),json.dumps(context,sort_keys=True,default=str)))
@@ -119,6 +129,16 @@ class StrategyRunner:
         with connect(self.engine.db_path) as db:
             rows=db.execute("SELECT * FROM paper_strategy_events WHERE strategy_id=? ORDER BY id DESC LIMIT ?", (strategy_id,limit)).fetchall()
         return [{**dict(row), "market_context":json.loads(row["market_context"])} for row in rows]
+
+    def protective_exits(self, position_ids, context):
+        if not position_ids: return 0
+        with connect(self.engine.db_path) as db:
+            rows=db.execute("SELECT id,account_id,reason FROM paper_positions WHERE id IN (%s)" % ",".join("?" * len(position_ids)), position_ids).fetchall()
+            strategies={row["account_id"]:row["id"] for row in db.execute("SELECT id,account_id FROM paper_strategies").fetchall()}
+        for row in rows:
+            strategy_id=strategies.get(row["account_id"])
+            if strategy_id: self.event(strategy_id,row["id"],row["reason"],context)
+        return len(rows)
 
     def on_market(self, price, context):
         price = Decimal(str(price)); opened = closed = 0

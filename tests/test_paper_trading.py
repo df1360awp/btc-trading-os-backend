@@ -157,6 +157,17 @@ def test_strategy_events_return_saved_market_context(engine):
     assert runner.events("events")[0]["market_context"]["signal"]["score"] == 3
 
 
+def test_strategy_update_and_protective_exit_event(engine):
+    engine.create_account(AccountRequest(account_id="protected",strategy_type="USER",strategy_id="protected"),"protected",Decimal("100"))
+    runner=StrategyRunner(engine)
+    runner.create("USER", {"id":"protected","account_id":"protected","direction":"LONG","entry_price":"100","entry_when":"AT_OR_ABOVE","quantity":"1","stop_loss":"90"})
+    assert runner.update("protected", {"direction":"LONG","entry_price":"101","entry_when":"AT_OR_ABOVE","quantity":"1","stop_loss":"90"})["definition"]["entry_price"] == "101"
+    order=engine.enter("protected",EntryRequest(direction="LONG",quantity="1",stop_loss="90"),"protective",Decimal("100"))
+    marked=engine.mark(Decimal("89"))
+    assert runner.protective_exits(marked["closed_position_ids"], {"price":89}) == 1
+    assert runner.events("protected")[0]["event"] == "STOP_LOSS"
+
+
 def test_liquidation_pressure_uses_public_event_history(tmp_path):
     db_path = tmp_path / "market.db"
     now = 1_800_000_000_000

@@ -235,12 +235,12 @@ class PaperEngine:
         try:
             rows=db.execute("SELECT * FROM paper_positions WHERE status='OPEN' ORDER BY opened_ms,id").fetchall()
             for account_id in {p["account_id"] for p in rows}: self._snapshot(db,account_id,mark_price,"MARK",timestamp)
-            closed=0
+            closed=[]
             for p in rows:
                 sign=1 if p["direction"]=="LONG" else -1; stop=p["stop_loss"]; take=p["take_profit"]
                 reason="STOP_LOSS" if stop and sign*(mark_price-Decimal(stop))<=0 else "TAKE_PROFIT" if take and sign*(mark_price-Decimal(take))>=0 else None
-                if reason: self._close(db,p,mark_price,reason,timestamp); closed+=1
-            db.commit(); return {"closed_positions":closed}
+                if reason: self._close(db,p,mark_price,reason,timestamp); closed.append(p["id"])
+            db.commit(); return {"closed_positions":len(closed),"closed_position_ids":closed}
         except Exception: db.rollback(); raise
         finally: db.close()
 

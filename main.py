@@ -325,6 +325,7 @@ async def collect_market_snapshot():
         changes = {exchange: {label: get_change(exchange, minutes) for label, minutes in {"5m":5,"30m":30,"1h":60,"4h":240}.items()} for exchange in ["binance","bybit","okx"]}
         signal = build_signal(changes, get_all_cvd_windows(), await fetch_all_obi(), {"average": sum(x["funding_rate"] for x in results) / len(results)})
         enriched_context = {**context, "signal": signal, "funding": {"average": sum(x["funding_rate"] for x in results) / len(results)}, "support_resistance": support_resistance(price), "liquidation": liquidation_pressure()}
+        strategies.protective_exits(marked["closed_position_ids"], enriched_context)
         user_result = strategies.on_market(price, enriched_context)
         system_result = strategies.on_signal(price, signal, enriched_context)
         try:
