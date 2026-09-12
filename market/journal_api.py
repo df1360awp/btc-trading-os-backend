@@ -23,6 +23,14 @@ def list_entries(limit: int = Query(default=100, ge=1, le=500)): return store.li
 def get_entry(entry_id: str): return store.get(entry_id)
 
 
+@router.put("/entries/{entry_id}")
+def update_entry(entry_id: str, request: JournalEntryRequest): return store.update(entry_id, request)
+
+
+@router.delete("/entries/{entry_id}")
+def delete_entry(entry_id: str): return store.delete(entry_id)
+
+
 @router.put("/entries/{entry_id}/image")
 def attach_image(entry_id: str, request: ImageRequest): return store.attach_image(entry_id, request)
 

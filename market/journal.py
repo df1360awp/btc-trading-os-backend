@@ -79,6 +79,22 @@ class JournalStore:
         if not row: raise PaperError("NOT_FOUND", "Journal entry not found", 404)
         return dict(row)
 
+    def update(self, entry_id, request):
+        current=self.get(entry_id)
+        if current["source"] != "MANUAL": raise PaperError("JOURNAL_IMMUTABLE", "Imported paper entries cannot be edited", 422)
+        data=request.model_dump()
+        with connect(self.db_path) as db:
+            db.execute("UPDATE journal_entries SET symbol=:symbol,side=:side,occurred_ms=:occurred_ms,user_reason=:user_reason,psychology=:psychology,updated_ms=:updated_ms WHERE id=:id", {**data,"id":entry_id,"updated_ms":self.clock()})
+        return self.get(entry_id)
+
+    def delete(self, entry_id):
+        current=self.get(entry_id)
+        if current["source"] != "MANUAL": raise PaperError("JOURNAL_IMMUTABLE", "Imported paper entries cannot be deleted", 422)
+        if current.get("image_path"): self._remove_private_file(current["image_path"])
+        with connect(self.db_path) as db:
+            db.execute("DELETE FROM journal_reviews WHERE entry_id=?",(entry_id,)); db.execute("DELETE FROM journal_entries WHERE id=?",(entry_id,))
+        return {"id":entry_id,"deleted":True}
+
     def list(self, limit=100):
         with connect(self.db_path) as db:
             rows = db.execute("SELECT * FROM journal_entries ORDER BY occurred_ms DESC LIMIT ?", (limit,)).fetchall()

@@ -203,6 +203,9 @@ def test_journal_keeps_reason_psychology_and_private_image(tmp_path):
     assert result["image_path"]
     assert (tmp_path / "uploads").exists()
     assert journal.remove_image(entry["id"])["image_path"] is None
+    updated=journal.update(entry["id"],JournalEntryRequest(source="MANUAL",occurred_ms=1_799_999_000_001,user_reason="revised"))
+    assert updated["user_reason"] == "revised"
+    assert journal.delete(entry["id"]) == {"id":entry["id"],"deleted":True}
 
 
 def test_journal_imports_closed_paper_trades(engine, tmp_path):
