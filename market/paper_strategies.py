@@ -38,6 +38,10 @@ class SystemStrategy(Model):
     conditions: list[dict] = Field(default_factory=list, max_length=12)
 
 
+class StrategyEnabled(Model):
+    enabled: bool
+
+
 class StrategyRunner:
     def __init__(self, engine: PaperEngine): self.engine = engine
     @staticmethod
@@ -89,6 +93,22 @@ class StrategyRunner:
     def list(self, route):
         with connect(self.engine.db_path) as db: rows = db.execute("SELECT * FROM paper_strategies WHERE route=? AND enabled=1", (route,)).fetchall()
         return [self.get(row["id"]) for row in rows]
+
+    def set_enabled(self, strategy_id, enabled):
+        row = self.get(strategy_id)
+        if not enabled and self.engine.records(row["account_id"], "positions"):
+            raise PaperError("OPEN_POSITION", "Close the paper position before pausing this strategy", 422)
+        with connect(self.engine.db_path) as db:
+            db.execute("UPDATE paper_strategies SET enabled=?,updated_ms=? WHERE id=?", (int(enabled), self.engine.clock(), strategy_id))
+        return self.get(strategy_id)
+
+    def delete(self, strategy_id):
+        row = self.get(strategy_id)
+        if self.engine.records(row["account_id"], "positions"):
+            raise PaperError("OPEN_POSITION", "Close the paper position before deleting this strategy", 422)
+        with connect(self.engine.db_path) as db:
+            db.execute("DELETE FROM paper_strategies WHERE id=?", (strategy_id,))
+        return {"id": strategy_id, "deleted": True}
 
     def event(self, strategy_id, position_id, event, context):
         with connect(self.engine.db_path) as db:

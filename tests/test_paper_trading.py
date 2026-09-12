@@ -124,6 +124,15 @@ def test_system_strategy_can_gate_existing_signal_with_market_confluence(engine)
     assert runner.on_signal(100, signal, context)["opened"] == 1
 
 
+def test_strategy_can_pause_and_delete_without_open_position(engine):
+    engine.create_account(AccountRequest(account_id="managed",strategy_type="USER",strategy_id="m"),"managed",Decimal("100"))
+    runner=StrategyRunner(engine)
+    runner.create("USER", {"id":"managed","account_id":"managed","direction":"LONG","entry_price":"100","entry_when":"AT_OR_ABOVE","quantity":"1"})
+    assert runner.set_enabled("managed", False)["enabled"] is False
+    assert runner.list("USER") == []
+    assert runner.delete("managed") == {"id":"managed","deleted":True}
+
+
 def test_liquidation_pressure_uses_public_event_history(tmp_path):
     db_path = tmp_path / "market.db"
     now = 1_800_000_000_000

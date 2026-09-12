@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query
 
 from market.paper_trading import (AccountRequest, EntryRequest, PaperEngine, PaperError,
                                   ProtectionRequest, require_paper_key)
-from market.paper_strategies import StrategyRunner, SystemStrategy, UserStrategy
+from market.paper_strategies import StrategyEnabled, StrategyRunner, SystemStrategy, UserStrategy
 
 DB_PATH = "/opt/btc-trading-os/market.db"
 engine = PaperEngine(DB_PATH)
@@ -66,6 +66,18 @@ def create_system_strategy(request: SystemStrategy): return strategies.create("S
 def list_strategies(route: str):
     if route not in ("USER", "SYSTEM"): raise HTTPException(status_code=404, detail="Strategy route not found")
     return strategies.list(route)
+
+
+@router.get("/strategy/{strategy_id}")
+def get_strategy(strategy_id: str): return strategies.get(strategy_id)
+
+
+@router.put("/strategy/{strategy_id}/enabled")
+def set_strategy_enabled(strategy_id: str, request: StrategyEnabled): return strategies.set_enabled(strategy_id, request.enabled)
+
+
+@router.delete("/strategy/{strategy_id}")
+def delete_strategy(strategy_id: str): return strategies.delete(strategy_id)
 
 
 @router.get("/accounts/{account_id}/{kind}")
