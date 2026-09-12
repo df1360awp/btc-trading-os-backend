@@ -88,6 +88,10 @@ def set_strategy_enabled(strategy_id: str, request: StrategyEnabled): return str
 def delete_strategy(strategy_id: str): return strategies.delete(strategy_id)
 
 
+@router.get("/strategy/{strategy_id}/events")
+def strategy_events(strategy_id: str, limit: int = Query(default=100, ge=1, le=500)): return strategies.events(strategy_id, limit)
+
+
 @router.get("/accounts/{account_id}/{kind}")
 def records(account_id: str,kind: str,limit: int = Query(default=100,ge=1,le=500)):
     return engine.records(account_id,kind,limit)

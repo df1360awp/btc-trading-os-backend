@@ -142,6 +142,14 @@ def test_strategy_can_pause_and_delete_without_open_position(engine):
     assert runner.delete("managed") == {"id":"managed","deleted":True}
 
 
+def test_strategy_events_return_saved_market_context(engine):
+    engine.create_account(AccountRequest(account_id="events",strategy_type="USER",strategy_id="events"),"events",Decimal("100"))
+    runner=StrategyRunner(engine)
+    runner.create("USER", {"id":"events","account_id":"events","direction":"LONG","entry_price":"100","entry_when":"AT_OR_ABOVE","quantity":"1"})
+    runner.on_market(100,{"price":100,"signal":{"score":3}})
+    assert runner.events("events")[0]["market_context"]["signal"]["score"] == 3
+
+
 def test_liquidation_pressure_uses_public_event_history(tmp_path):
     db_path = tmp_path / "market.db"
     now = 1_800_000_000_000

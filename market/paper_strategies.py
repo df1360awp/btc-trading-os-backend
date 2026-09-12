@@ -114,6 +114,12 @@ class StrategyRunner:
         with connect(self.engine.db_path) as db:
             db.execute("INSERT INTO paper_strategy_events(strategy_id,position_id,event,timestamp_ms,market_context) VALUES(?,?,?,?,?)", (strategy_id,position_id,event,self.engine.clock(),json.dumps(context,sort_keys=True,default=str)))
 
+    def events(self, strategy_id, limit=100):
+        self.get(strategy_id)
+        with connect(self.engine.db_path) as db:
+            rows=db.execute("SELECT * FROM paper_strategy_events WHERE strategy_id=? ORDER BY id DESC LIMIT ?", (strategy_id,limit)).fetchall()
+        return [{**dict(row), "market_context":json.loads(row["market_context"])} for row in rows]
+
     def on_market(self, price, context):
         price = Decimal(str(price)); opened = closed = 0
         for row in self.list("USER"):
