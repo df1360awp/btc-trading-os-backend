@@ -252,8 +252,15 @@ async def collect_market_snapshot():
         save_snapshot(results)
         # The paper engine receives only the existing server-side aggregate quote.
         # It cannot submit a real-exchange order.
-        from market.paper_api import engine
-        engine.mark(sum(item["price"] for item in results) / len(results))
+        from market.paper_api import engine, strategies
+        price = sum(item["price"] for item in results) / len(results)
+        engine.mark(price)
+        context = {"price": price, "sources": results}
+        strategies.on_market(price, context)
+        # B consumes the existing Signal Engine's output; it never changes its rules.
+        changes = {exchange: {label: get_change(exchange, minutes) for label, minutes in {"5m":5,"30m":30,"1h":60,"4h":240}.items()} for exchange in ["binance","bybit","okx"]}
+        signal = build_signal(changes, get_all_cvd_windows(), await fetch_all_obi(), {"average": sum(x["funding_rate"] for x in results) / len(results)})
+        strategies.on_signal(price, signal, {**context, "signal": signal})
 
     if errors:
         print("snapshot errors:", errors)

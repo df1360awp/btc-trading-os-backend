@@ -65,6 +65,16 @@ def init_paper_tables(db_path=DB_PATH):
         CREATE TABLE IF NOT EXISTS paper_idempotency (
           scope TEXT NOT NULL, key TEXT NOT NULL, fingerprint TEXT NOT NULL, response TEXT NOT NULL, PRIMARY KEY(scope,key)
         );
+        CREATE TABLE IF NOT EXISTS paper_strategies (
+          id TEXT PRIMARY KEY, account_id TEXT NOT NULL REFERENCES paper_accounts(id), route TEXT NOT NULL CHECK(route IN ('USER','SYSTEM')),
+          enabled INTEGER NOT NULL DEFAULT 1, definition TEXT NOT NULL, state TEXT NOT NULL DEFAULT '{}', created_ms INTEGER NOT NULL, updated_ms INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_paper_strategies_enabled ON paper_strategies(route,enabled);
+        CREATE TABLE IF NOT EXISTS paper_strategy_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT, strategy_id TEXT NOT NULL REFERENCES paper_strategies(id), position_id TEXT,
+          event TEXT NOT NULL, timestamp_ms INTEGER NOT NULL, market_context TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_paper_strategy_events ON paper_strategy_events(strategy_id,timestamp_ms);
         """)
 
 

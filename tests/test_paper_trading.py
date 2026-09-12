@@ -2,7 +2,8 @@ from decimal import Decimal
 
 import pytest
 
-from market.paper_trading import AccountRequest, EntryRequest, PaperEngine, PaperError, ProtectionRequest
+from market.paper_trading import AccountRequest, EntryRequest, PaperEngine, PaperError, ProtectionRequest, connect
+from market.paper_strategies import StrategyRunner
 
 
 @pytest.fixture
@@ -76,3 +77,18 @@ def test_rejects_overcommit_and_bad_protection_without_position(engine):
     with pytest.raises(PaperError,match="wrong side"):
         engine.enter("user",EntryRequest(direction="LONG",quantity="1",stop_loss="110"),"bad",Decimal("100"))
     assert engine.records("user","positions") == []
+
+
+def test_user_strategy_and_system_signal_adapter_share_engine(engine):
+    engine.create_account(AccountRequest(account_id="a-route",strategy_type="USER",strategy_id="a"),"a",Decimal("100"))
+    engine.create_account(AccountRequest(account_id="b-route",strategy_type="SYSTEM",strategy_id="b"),"b",Decimal("100"))
+    runner=StrategyRunner(engine)
+    runner.create("USER",{"id":"a","account_id":"a-route","direction":"LONG","entry_price":"105","entry_when":"AT_OR_ABOVE","quantity":"1","stop_loss":"95","take_profit":"120"})
+    assert runner.on_market(104,{"price":104}) == {"opened":0,"closed":0}
+    assert runner.on_market(105,{"price":105})["opened"] == 1
+    assert Decimal(engine.records("a-route","positions")[0]["entry_price"]) > Decimal("105")
+    runner.create("SYSTEM",{"id":"b","account_id":"b-route","quantity":"1","stop_distance":"10","take_distance":"20"})
+    assert runner.on_signal(105,{"score":3,"bias":"BULLISH"},{"price":105})["opened"] == 1
+    assert engine.records("b-route","positions")[0]["direction"] == "LONG"
+    with connect(engine.db_path) as db:
+        assert db.execute("SELECT COUNT(*) FROM paper_strategy_events").fetchone()[0] == 2

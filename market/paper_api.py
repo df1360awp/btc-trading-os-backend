@@ -5,9 +5,11 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query
 
 from market.paper_trading import (AccountRequest, EntryRequest, PaperEngine, PaperError,
                                   ProtectionRequest, require_paper_key)
+from market.paper_strategies import StrategyRunner, SystemStrategy, UserStrategy
 
 DB_PATH = "/opt/btc-trading-os/market.db"
 engine = PaperEngine(DB_PATH)
+strategies = StrategyRunner(engine)
 router = APIRouter(prefix="/paper", tags=["Paper Trading"], dependencies=[Depends(require_paper_key)])
 
 
@@ -50,6 +52,20 @@ def protect(account_id: str,position_id: str,request: ProtectionRequest,idempote
 
 @router.get("/accounts/{account_id}/metrics")
 def metrics(account_id: str): return engine.metrics(account_id)
+
+
+@router.post("/strategies/user", status_code=201)
+def create_user_strategy(request: UserStrategy): return strategies.create("USER", request)
+
+
+@router.post("/strategies/system", status_code=201)
+def create_system_strategy(request: SystemStrategy): return strategies.create("SYSTEM", request)
+
+
+@router.get("/strategies/{route}")
+def list_strategies(route: str):
+    if route not in ("USER", "SYSTEM"): raise HTTPException(status_code=404, detail="Strategy route not found")
+    return strategies.list(route)
 
 
 @router.get("/accounts/{account_id}/{kind}")
