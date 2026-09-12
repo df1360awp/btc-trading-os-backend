@@ -3,7 +3,8 @@ import sqlite3
 from datetime import datetime, timezone, timedelta
 
 import httpx
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from market.cvd import fetch_all_cvd
 from market.cvd_windows import get_all_cvd_windows
@@ -12,11 +13,19 @@ from market.signal_engine import build_signal
 from market.alert_api import router as alert_router
 from market.fcm_api import router as fcm_router
 from market.alert_monitor import run_alert_monitor
+from market.paper_api import router as paper_router
+from market.paper_trading import PaperError, init_paper_tables
 
 app = FastAPI(title="BTC Trading OS API")
 
 app.include_router(alert_router)
 app.include_router(fcm_router)
+app.include_router(paper_router)
+
+
+@app.exception_handler(PaperError)
+async def paper_error_handler(request: Request, exc: PaperError):
+    return JSONResponse(status_code=exc.status, content={"error": exc.code, "detail": exc.detail})
 
 DB_PATH = "/opt/btc-trading-os/market.db"
 
@@ -50,6 +59,7 @@ def init_db():
 
     conn.commit()
     conn.close()
+    init_paper_tables(DB_PATH)
 
 
 async def fetch_binance(client):
@@ -237,6 +247,10 @@ async def collect_market_snapshot():
 
     if results:
         save_snapshot(results)
+        # The paper engine receives only the existing server-side aggregate quote.
+        # It cannot submit a real-exchange order.
+        from market.paper_api import engine
+        engine.mark(sum(item["price"] for item in results) / len(results))
 
     if errors:
         print("snapshot errors:", errors)
