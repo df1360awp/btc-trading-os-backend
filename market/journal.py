@@ -106,6 +106,21 @@ class JournalStore:
         if previous: self._remove_private_file(previous)
         return self.get(entry_id)
 
+    def import_paper_trades(self, engine, account_id, limit=100):
+        with connect(self.db_path) as db:
+            account=db.execute("SELECT strategy_type FROM paper_accounts WHERE id=?", (account_id,)).fetchone()
+        if not account: raise PaperError("NOT_FOUND", "Paper account not found", 404)
+        source = "PAPER_USER" if account["strategy_type"] == "USER" else "PAPER_SYSTEM"
+        imported=[]
+        for trade in engine.records(account_id, "trades", limit):
+            entry_id=f"paper:{trade['id']}"
+            try:
+                entry=self.create(JournalEntryRequest(id=entry_id,source=source,side=trade["direction"],occurred_ms=trade["closed_ms"],paper_account_id=account_id,paper_position_id=trade["id"],user_reason=f"Paper trade: {trade['reason']}; entry {trade['entry_price']}; exit {trade['exit_price']}; PnL {trade['profit_loss']}"))
+                imported.append(entry)
+            except PaperError as error:
+                if error.code != "JOURNAL_EXISTS": raise
+        return imported
+
     def _remove_private_file(self, value):
         path = Path(value)
         if path.parent == self.upload_dir and path.is_file(): path.unlink()

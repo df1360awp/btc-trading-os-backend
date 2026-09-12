@@ -187,6 +187,15 @@ def test_journal_keeps_reason_psychology_and_private_image(tmp_path):
     assert journal.remove_image(entry["id"])["image_path"] is None
 
 
+def test_journal_imports_closed_paper_trades(engine, tmp_path):
+    order=engine.enter("user",EntryRequest(direction="LONG",quantity="1"),"journal-import",Decimal("100"))
+    engine.close("user",order["position_id"],"journal-close",Decimal("110"))
+    init_journal_tables(engine.db_path)
+    journal=JournalStore(engine.db_path,tmp_path / "uploads",clock=lambda:1_800_000_000_000)
+    assert len(journal.import_paper_trades(engine,"user")) == 1
+    assert journal.import_paper_trades(engine,"user") == []
+
+
 def test_ai_review_persists_entry_result_without_network(tmp_path):
     db_path = tmp_path / "market.db"; init_journal_tables(str(db_path))
     with connect(str(db_path)) as db:

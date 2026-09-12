@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from market.journal import ImageRequest, JournalEntryRequest, JournalStore
 from market.ai_review import ReviewService
 from market.paper_trading import require_paper_key
+from market.paper_api import engine
 
 store = JournalStore()
 reviews = ReviewService(store)
@@ -28,6 +29,10 @@ def attach_image(entry_id: str, request: ImageRequest): return store.attach_imag
 
 @router.delete("/entries/{entry_id}/image")
 def remove_image(entry_id: str): return store.remove_image(entry_id)
+
+
+@router.post("/import-paper/{account_id}", status_code=201)
+def import_paper(account_id: str, limit: int = Query(default=100, ge=1, le=500)): return store.import_paper_trades(engine, account_id, limit)
 
 
 @router.post("/entries/{entry_id}/reviews", status_code=201)
