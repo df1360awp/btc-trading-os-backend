@@ -87,7 +87,11 @@ async def check_official_macro_releases():
                 record, created=macro_store.ingest_official_release(source,item["title"],item["url"],item["published_ms"],item["description"])
                 if created and record["event_id"] and record["extracted_actual"]:
                     try:
-                        await asyncio.to_thread(send_to_active_devices,{"alert_type":"MACRO_RELEASE","event_id":record["event_id"],"actual":record["extracted_actual"],"source":source,"message":record["title"]})
+                        from market.macro_intelligence import MacroIntelligenceService
+                        context=macro_store.impact_context(record["event_id"])
+                        rating=await asyncio.to_thread(MacroIntelligenceService().evaluate,context)
+                        saved=macro_store.save_impact_rating(record["event_id"],**rating)
+                        await asyncio.to_thread(send_to_active_devices,{"alert_type":"MACRO_IMPACT","event_id":record["event_id"],"actual":record["extracted_actual"],"source":source,"rating":saved["rating"],"bias":saved["bias"],"message":saved["analysis"][:300]})
                     except Exception: pass
     except Exception as error:
         print("Official macro release monitor error:", repr(error))
