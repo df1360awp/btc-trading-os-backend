@@ -213,10 +213,10 @@ class PaperEngine:
         db.execute("INSERT INTO paper_orders(id,account_id,kind,status,request,created_ms,updated_ms,position_id,fill_price,quantity,fee,reason) VALUES(?,?,'EXIT','FILLED',?,?,?,?,?,?,?,?)",(order_id,account["id"],json.dumps({"reason":reason}),self.clock(),self.clock(),position["id"],amount(fill),amount(quantity),amount(fee),reason))
         db.execute("UPDATE paper_positions SET status='CLOSED',exit_order_id=?,exit_price=?,exit_fee=?,closed_ms=?,profit_loss=?,reason=? WHERE id=?",(order_id,amount(fill),amount(fee),timestamp,amount(net),reason,position["id"])); db.execute("UPDATE paper_accounts SET balance=? WHERE id=?",(amount(Decimal(account["balance"])+sign*(fill-Decimal(position["entry_price"]))*quantity-fee),account["id"])); self._snapshot(db,account["id"],mark_price,reason,timestamp); return dict(db.execute("SELECT * FROM paper_positions WHERE id=?",(position["id"],)).fetchone())
 
-    def close(self,account_id,position_id,key,mark_price):
+    def close(self,account_id,position_id,key,mark_price,reason="MANUAL_CLOSE"):
         db=self._tx()
         try:
-            result=self._receipt(db,account_id,key,{"close":position_id},lambda:self._close(db,self._position(db,account_id,position_id),mark_price,"MANUAL_CLOSE",self.clock())); db.commit(); return result
+            result=self._receipt(db,account_id,key,{"close":position_id,"reason":reason},lambda:self._close(db,self._position(db,account_id,position_id),mark_price,reason,self.clock())); db.commit(); return result
         except Exception: db.rollback(); raise
         finally: db.close()
 

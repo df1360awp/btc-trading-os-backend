@@ -142,6 +142,28 @@ def test_strategy_conditions_use_actual_support_resistance_context_fields(engine
     assert runner.on_market(100,{"price":100,"support_resistance":{"support_distance_pct":0.5}})["opened"] == 1
 
 
+def test_system_strategy_autonomously_exits_on_reversal_or_market_invalidation(engine):
+    engine.create_account(AccountRequest(account_id="system-exit",strategy_type="SYSTEM",strategy_id="b-exit"),"b-exit",Decimal("100"))
+    runner = StrategyRunner(engine)
+    runner.create("SYSTEM", {
+        "id":"b-exit", "account_id":"system-exit", "quantity":"1", "stop_distance":"10", "take_distance":"20",
+        "exit_conditions":[{"field":"cvd.composite_5m_btc","op":"LTE","value":"-10"}],
+    })
+    assert runner.on_signal(100,{"score":3,"bias":"BULLISH","structure":"UP"},{"cvd":{"composite_5m_btc":5}})["opened"] == 1
+    result = runner.on_signal(99,{"score":1,"bias":"BULLISH","structure":"WEAK"},{"cvd":{"composite_5m_btc":-11}})
+    assert result == {"opened":0,"closed":1}
+    assert engine.records("system-exit","trades")[0]["reason"] == "SYSTEM_EXIT_CONDITION"
+
+
+def test_system_strategy_autonomously_exits_on_opposite_signal(engine):
+    engine.create_account(AccountRequest(account_id="system-reversal",strategy_type="SYSTEM",strategy_id="b-reversal"),"b-reversal",Decimal("100"))
+    runner = StrategyRunner(engine)
+    runner.create("SYSTEM", {"id":"b-reversal","account_id":"system-reversal","quantity":"1","stop_distance":"10","take_distance":"20"})
+    assert runner.on_signal(100,{"score":3,"bias":"BULLISH","structure":"UP"},{})["opened"] == 1
+    assert runner.on_signal(99,{"score":-3,"bias":"BEARISH","structure":"DOWN"},{}) == {"opened":0,"closed":1}
+    assert engine.records("system-reversal","trades")[0]["reason"] == "OPPOSITE_SIGNAL"
+
+
 def test_strategy_can_pause_and_delete_without_open_position(engine):
     engine.create_account(AccountRequest(account_id="managed",strategy_type="USER",strategy_id="m"),"managed",Decimal("100"))
     runner=StrategyRunner(engine)

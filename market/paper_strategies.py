@@ -33,9 +33,13 @@ class SystemStrategy(Model):
     stop_distance: Decimal = Field(gt=0)
     take_distance: Decimal = Field(gt=0)
     cooldown_seconds: int = Field(default=300, ge=0, le=86400)
-    # Optional confluence gates let B consume the existing market context without
-    # changing the Signal Engine that provides its directional signal.
+    # Entry and exit gates consume the existing market context without changing
+    # the Signal Engine that supplies the directional signal.
     conditions: list[dict] = Field(default_factory=list, max_length=12)
+    exit_conditions: list[dict] = Field(default_factory=list, max_length=12)
+    exit_on_opposite_signal: bool = True
+    min_abs_exit_score: int | None = Field(default=None, ge=1, le=10)
+    max_hold_seconds: int | None = Field(default=None, ge=60, le=2_592_000)
 
 
 class StrategyEnabled(Model):
@@ -51,6 +55,9 @@ class StrategyRunner:
         """Small allowlisted condition DSL; missing/stale fields never trigger a trade."""
         allowed = {
             "price", "signal.score", "signal.bias", "signal.structure",
+            "oi.average_change_5m_pct", "oi.average_change_30m_pct",
+            "oi.average_change_1h_pct", "cvd.composite_5m_btc",
+            "cvd.composite_30m_btc", "cvd.composite_1h_btc",
             "funding.average", "obi.composite_obi",
             "support_resistance.state", "support_resistance.support_distance_pct",
             "support_resistance.resistance_distance_pct",
@@ -152,14 +159,32 @@ class StrategyRunner:
         return {"opened":opened,"closed":closed}
 
     def on_signal(self, price, signal, context):
-        price = Decimal(str(price)); opened = 0
+        price = Decimal(str(price)); opened = closed = 0
         for row in self.list("SYSTEM"):
             d = SystemStrategy.model_validate(row["definition"]); score = signal.get("score",0); bias = signal.get("bias")
             direction = "LONG" if bias == "BULLISH" else "SHORT" if bias == "BEARISH" else None
             fingerprint = f"{direction}:{score}:{signal.get('structure')}"; state = row["state"]
             cooling = self.engine.clock() - state.get("last_entry_ms", 0) < d.cooldown_seconds * 1000
+            positions = self.engine.records(d.account_id,"positions")
+            if positions:
+                position = positions[0]
+                opposite = ((position["direction"] == "LONG" and direction == "SHORT")
+                            or (position["direction"] == "SHORT" and direction == "LONG"))
+                exit_score = d.min_abs_exit_score or d.min_abs_score
+                held_ms = self.engine.clock() - int(position["opened_ms"])
+                reason = None
+                if d.exit_conditions and self.conditions_match(d.exit_conditions, context):
+                    reason = "SYSTEM_EXIT_CONDITION"
+                elif d.exit_on_opposite_signal and opposite and abs(score) >= exit_score:
+                    reason = "OPPOSITE_SIGNAL"
+                elif d.max_hold_seconds is not None and held_ms >= d.max_hold_seconds * 1000:
+                    reason = "MAX_HOLD_TIME"
+                if reason:
+                    self.engine.close(d.account_id, position["id"], "system-exit:"+d.id+":"+str(self.engine.clock()), price, reason)
+                    self.event(d.id, position["id"], reason, {**context, "signal": signal})
+                    closed += 1
+                continue
             if (not direction or abs(score) < d.min_abs_score or cooling
-                    or self.engine.records(d.account_id,"positions")
                     or not self.conditions_match(d.conditions, context)): continue
             stop = Decimal(amount(price-d.stop_distance if direction == "LONG" else price+d.stop_distance))
             take = Decimal(amount(price+d.take_distance if direction == "LONG" else price-d.take_distance))
@@ -168,4 +193,4 @@ class StrategyRunner:
                 self.event(d.id,order["position_id"],"SIGNAL_ENTRY",{**context,"signal":signal})
                 self.save_state(d.id,{"last_entry_ms":self.engine.clock(),"last_signal":fingerprint,"last_direction":direction})
                 opened += 1
-        return {"opened":opened}
+        return {"opened":opened, "closed":closed}

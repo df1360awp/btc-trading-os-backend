@@ -371,8 +371,25 @@ async def collect_market_snapshot():
         context = {"price": price, "sources": results}
         # B consumes the existing Signal Engine's output; it never changes its rules.
         changes = {exchange: {label: get_change(exchange, minutes) for label, minutes in {"5m":5,"30m":30,"1h":60,"4h":240}.items()} for exchange in ["binance","bybit","okx"]}
-        signal = build_signal(changes, get_all_cvd_windows(), await fetch_all_obi(), {"average": sum(x["funding_rate"] for x in results) / len(results)})
-        enriched_context = {**context, "signal": signal, "funding": {"average": sum(x["funding_rate"] for x in results) / len(results)}, "support_resistance": support_resistance(price), "liquidation": liquidation_pressure()}
+        cvd_windows = get_all_cvd_windows()
+        obi = await fetch_all_obi()
+        funding_average = sum(x["funding_rate"] for x in results) / len(results)
+        signal = build_signal(changes, cvd_windows, obi, {"average": funding_average})
+        def average_change(label):
+            values=[item.get(label,{}).get("oi_change_pct") for item in changes.values()]
+            values=[value for value in values if value is not None]
+            return sum(values)/len(values) if values else None
+        def composite_cvd(label):
+            values=[]
+            for exchange in cvd_windows.values():
+                point=exchange.get(label,{}) if isinstance(exchange,dict) else {}
+                value=point.get("cvd_btc") if isinstance(point,dict) else None
+                if value is not None: values.append(value)
+            return sum(values) if values else None
+        enriched_context = {**context, "signal": signal, "funding": {"average": funding_average}, "obi": obi,
+            "oi": {"average_change_5m_pct": average_change("5m"), "average_change_30m_pct": average_change("30m"), "average_change_1h_pct": average_change("1h")},
+            "cvd": {"composite_5m_btc": composite_cvd("5m"), "composite_30m_btc": composite_cvd("30m"), "composite_1h_btc": composite_cvd("1h")},
+            "support_resistance": support_resistance(price), "liquidation": liquidation_pressure()}
         strategies.protective_exits(marked["closed_position_ids"], enriched_context)
         user_result = strategies.on_market(price, enriched_context)
         system_result = strategies.on_signal(price, signal, enriched_context)
