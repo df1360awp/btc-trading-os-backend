@@ -9,6 +9,7 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 from market.cvd import fetch_all_cvd
 from market.cvd_windows import get_all_cvd_windows
 from market.obi import fetch_all_obi
@@ -92,6 +93,19 @@ async def check_sudden_risks():
                 if result.get("failed",0)==0: risk_store.mark_delivered(event["id"])
     except Exception as error:
         print("Sudden risk monitor error:", repr(error))
+
+
+async def run_scheduled_journal_review(period):
+    """Generate daily/weekly/monthly retrospective reviews, never trade signals."""
+    try:
+        from market.ai_review import ReviewService
+        review, created = await asyncio.to_thread(ReviewService(journal_store, DB_PATH).create_scheduled_period_review, period)
+        context = json.loads(review["market_context"])
+        if created and context.get("entry_count", 0):
+            await asyncio.to_thread(send_to_active_devices, {"alert_type": "JOURNAL_REVIEW", "period": period,
+                "review_id": review["id"], "message": f"{period} 交易复盘已生成，包含 {context['entry_count']} 条记录"})
+    except Exception as error:
+        print("Scheduled journal review error:", repr(error))
 
 
 def ensure_default_system_paper_strategy(price):
@@ -549,6 +563,9 @@ async def startup():
     )
     scheduler.add_job(check_macro_reminders, "interval", minutes=5, max_instances=1)
     scheduler.add_job(check_sudden_risks, "interval", minutes=10, max_instances=1)
+    scheduler.add_job(run_scheduled_journal_review, CronTrigger(hour=0, minute=15, timezone="Asia/Shanghai"), args=["DAILY"], max_instances=1)
+    scheduler.add_job(run_scheduled_journal_review, CronTrigger(day_of_week="mon", hour=0, minute=25, timezone="Asia/Shanghai"), args=["WEEKLY"], max_instances=1)
+    scheduler.add_job(run_scheduled_journal_review, CronTrigger(day=1, hour=0, minute=35, timezone="Asia/Shanghai"), args=["MONTHLY"], max_instances=1)
     scheduler.start()
 
     await collect_market_snapshot()

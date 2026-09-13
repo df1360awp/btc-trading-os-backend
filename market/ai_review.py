@@ -70,6 +70,17 @@ class ReviewService:
                   "Use only supplied records. This is education and retrospective analysis, never a price prediction or trading instruction.\n\n" + json.dumps(context, ensure_ascii=False, default=str))
         return self._run(None, period, start_ms, end_ms, context, prompt, None)
 
+    def create_scheduled_period_review(self, period, end_ms=None):
+        """Create at most one completed automated review per calendar day."""
+        end_ms = end_ms or self.clock()
+        day_start = end_ms - (end_ms % 86_400_000)
+        with connect(self.db_path) as db:
+            row = db.execute("""SELECT * FROM journal_reviews WHERE entry_id IS NULL AND period=?
+                AND status='COMPLETED' AND period_end_ms BETWEEN ? AND ? ORDER BY created_ms DESC LIMIT 1""", (period, day_start, day_start + 86_400_000 - 1)).fetchone()
+        if row:
+            return dict(row), False
+        return self.create_period_review(period, end_ms), True
+
     def _run(self, entry_id, period, start_ms, end_ms, context, prompt, image):
         review_id, now = str(uuid.uuid4()), self.clock()
         with connect(self.db_path) as db:

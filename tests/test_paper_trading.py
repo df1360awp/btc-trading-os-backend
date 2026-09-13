@@ -280,6 +280,16 @@ def test_ai_review_persists_entry_result_without_network(tmp_path):
     assert service.list(entry["id"])[0]["id"] == review["id"]
 
 
+def test_scheduled_period_review_is_idempotent_per_calendar_day(tmp_path):
+    db_path=tmp_path / "market.db"; init_journal_tables(str(db_path))
+    store=JournalStore(str(db_path),tmp_path / "uploads",clock=lambda:1_800_000_000_000)
+    store.create(JournalEntryRequest(source="MANUAL",occurred_ms=1_799_999_000_000,user_reason="test"))
+    service=ReviewService(store,str(db_path),clock=lambda:1_800_000_001_000,requester=lambda prompt,image:("日报","test-model"))
+    first,created=service.create_scheduled_period_review("DAILY",1_800_000_001_000)
+    second,created_again=service.create_scheduled_period_review("DAILY",1_800_000_002_000)
+    assert created and not created_again and first["id"] == second["id"]
+
+
 def test_vision_review_uses_verified_image_time_and_full_market_context(tmp_path):
     db_path = tmp_path / "market.db"; init_journal_tables(str(db_path)); init_macro_tables(str(db_path))
     image_time = 1_799_999_500_000
