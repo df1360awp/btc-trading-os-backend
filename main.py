@@ -16,7 +16,7 @@ from market.fcm_api import router as fcm_router
 from market.alert_monitor import run_alert_monitor
 from market.liquidation import liquidation_pressure
 from market.paper_api import router as paper_router
-from market.paper_trading import PaperError, init_paper_tables
+from market.paper_trading import AccountRequest, PaperError, init_paper_tables
 from market.journal import init_journal_tables
 from market.journal_api import router as journal_router
 from market.macro import MacroEvent, MacroStore, init_macro_tables
@@ -65,6 +65,29 @@ async def check_macro_reminders():
         await asyncio.to_thread(macro_store.send_due, send_to_active_devices)
     except Exception as error:
         print("Macro reminder error:", repr(error))
+
+
+def ensure_default_system_paper_strategy(price):
+    """Start B as a system-owned virtual strategy when none exists.
+
+    It is intentionally conservative and only touches the shared PaperEngine;
+    no exchange client or real order path is involved.
+    """
+    from market.paper_api import engine, strategies
+    if strategies.list("SYSTEM"):
+        return
+    account_id = "paper-system-btc-v1"
+    strategy_id = "system-btc-confluence-v1"
+    engine.create_account(AccountRequest(
+        account_id=account_id, strategy_type="SYSTEM", strategy_id=strategy_id,
+        initial_balance=10_000,
+    ), "bootstrap:" + account_id, price)
+    strategies.create("SYSTEM", {
+        "id": strategy_id, "account_id": account_id,
+        "quantity": "0.001", "stop_distance": "600", "take_distance": "1200",
+        "cooldown_seconds": 900, "exit_on_opposite_signal": True,
+        "min_abs_exit_score": 3, "max_hold_seconds": 86400,
+    })
 
 
 async def notify_paper_activity(price, marked, user_result, system_result):
@@ -477,6 +500,9 @@ async def startup():
     scheduler.start()
 
     await collect_market_snapshot()
+    # The first trusted quote is now available for virtual-account valuation.
+    from market.paper_api import mark_price
+    ensure_default_system_paper_strategy(mark_price())
 
 
 @app.get("/health")
