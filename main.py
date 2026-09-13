@@ -27,7 +27,7 @@ from market.macro_api import router as macro_router
 from market.risk import RiskEventRequest, RiskStore, init_risk_tables
 from market.risk_api import router as risk_router
 from market.fcm_sender import send_to_active_devices
-from market.market_analysis import MarketAnalysisService
+from market.market_analysis import MarketAnalysisService, MarketAnalysisStore, init_market_analysis_tables
 from market.research_context import compose_research_context
 from market.journal import JournalStore
 from market.data_health import market_data_health
@@ -65,6 +65,7 @@ DB_PATH = "/opt/btc-trading-os/market.db"
 macro_store = MacroStore(DB_PATH)
 journal_store = JournalStore(DB_PATH)
 risk_store = RiskStore(DB_PATH)
+market_analysis_store = MarketAnalysisStore(DB_PATH)
 
 
 async def check_macro_reminders():
@@ -191,6 +192,7 @@ def init_db():
     init_journal_tables(DB_PATH)
     init_macro_tables(DB_PATH)
     init_risk_tables(DB_PATH)
+    init_market_analysis_tables(DB_PATH)
     init_app_sessions(DB_PATH)
 
 
@@ -807,7 +809,15 @@ async def btc_liquidation_map(window_seconds: int = 86400, price_bin_usd: int = 
 async def ai_market_analysis():
     state, signal = await asyncio.gather(btc_state(), btc_signal())
     context = {"market_state": state, "signal_engine": signal, "liquidation": liquidation_pressure()}
-    return await asyncio.to_thread(MarketAnalysisService().explain, context)
+    result = await asyncio.to_thread(MarketAnalysisService().explain, context)
+    return market_analysis_store.create(result)
+
+
+@app.get("/ai/market-analysis/reports", dependencies=[Depends(require_paper_key)])
+async def list_market_analysis_reports(limit: int = 100):
+    if limit < 1 or limit > 500:
+        return JSONResponse(status_code=422, content={"error": "INVALID_LIMIT", "detail": "limit must be 1..500"})
+    return market_analysis_store.list(limit)
 
 # =========================
 # Automatic Price Alert Monitor

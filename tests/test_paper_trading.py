@@ -12,6 +12,7 @@ from market.market_analysis import MarketAnalysisService
 from market.macro_analysis import MacroAnalysisService
 from market.research_context import compose_research_context
 from market.risk import RiskEventRequest, RiskStore, init_risk_tables
+from market.market_analysis import MarketAnalysisStore, init_market_analysis_tables
 from market.data_health import market_data_health
 from market.app_auth import init_app_sessions, issue_session
 
@@ -361,6 +362,14 @@ def test_market_ai_explains_context_without_becoming_executor():
     result=service.explain({"signal_engine":{"signal":{"bias":"BULLISH"}},"liquidation":{"state":"BALANCED"}})
     assert result["analysis"] == "市场解释"
     assert result["model"] == "test-model"
+
+
+def test_market_analysis_reports_are_persisted(tmp_path):
+    db_path=tmp_path / "market.db"; init_market_analysis_tables(str(db_path))
+    store=MarketAnalysisStore(str(db_path),clock=lambda:1_800_000_000_000)
+    result=store.create({"analysis":"市场解释","model":"test-model","context":{"signal_engine":{"bias":"BULLISH"}}})
+    assert result["analysis"] == "市场解释"
+    assert store.list()[0]["context"]["signal_engine"]["bias"] == "BULLISH"
 
 
 def test_macro_ai_explains_release_without_becoming_executor():
