@@ -1,4 +1,5 @@
 import asyncio
+import json
 import sqlite3
 from datetime import datetime, timezone, timedelta
 
@@ -134,6 +135,15 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_market_exchange
         ON market_snapshots(exchange)
     """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS market_context_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp_ms INTEGER NOT NULL,
+            context_json TEXT NOT NULL
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_context_snapshot_time ON market_context_snapshots(timestamp_ms)")
 
     conn.commit()
     conn.close()
@@ -355,6 +365,19 @@ def save_snapshot(results):
     conn.close()
 
 
+def save_market_context_snapshot(context, timestamp_ms=None):
+    """Persist the complete server-observed context for retrospective review."""
+    timestamp_ms = timestamp_ms or int(datetime.now(timezone.utc).timestamp() * 1000)
+    conn = sqlite3.connect(DB_PATH, timeout=10)
+    conn.execute("PRAGMA busy_timeout=10000")
+    conn.execute(
+        "INSERT INTO market_context_snapshots(timestamp_ms,context_json) VALUES(?,?)",
+        (timestamp_ms, json.dumps(context, ensure_ascii=False, default=str)),
+    )
+    conn.commit()
+    conn.close()
+
+
 def support_resistance(price, lookback_minutes=240):
     """Derive conservative key levels from existing multi-exchange snapshots.
 
@@ -413,6 +436,7 @@ async def collect_market_snapshot():
             "oi": {"average_change_5m_pct": average_change("5m"), "average_change_30m_pct": average_change("30m"), "average_change_1h_pct": average_change("1h")},
             "cvd": {"composite_5m_btc": composite_cvd("5m"), "composite_30m_btc": composite_cvd("30m"), "composite_1h_btc": composite_cvd("1h")},
             "support_resistance": support_resistance(price), "liquidation": liquidation_pressure()}
+        save_market_context_snapshot(enriched_context)
         strategies.protective_exits(marked["closed_position_ids"], enriched_context)
         user_result = strategies.on_market(price, enriched_context)
         system_result = strategies.on_signal(price, signal, enriched_context)

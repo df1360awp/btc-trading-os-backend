@@ -39,6 +39,10 @@ def attach_image(entry_id: str, request: ImageRequest): return store.attach_imag
 def remove_image(entry_id: str): return store.remove_image(entry_id)
 
 
+@router.post("/entries/{entry_id}/vision-context")
+def extract_vision_context(entry_id: str): return reviews.extract_image_context(entry_id)
+
+
 @router.post("/import-paper/{account_id}", status_code=201)
 def import_paper(account_id: str, limit: int = Query(default=100, ge=1, le=500)): return store.import_paper_trades(engine, account_id, limit)
 

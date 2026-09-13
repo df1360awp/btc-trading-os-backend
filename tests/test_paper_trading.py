@@ -263,6 +263,31 @@ def test_ai_review_persists_entry_result_without_network(tmp_path):
     assert service.list(entry["id"])[0]["id"] == review["id"]
 
 
+def test_vision_review_uses_verified_image_time_and_full_market_context(tmp_path):
+    db_path = tmp_path / "market.db"; init_journal_tables(str(db_path)); init_macro_tables(str(db_path))
+    image_time = 1_799_999_500_000
+    with connect(str(db_path)) as db:
+        db.execute("CREATE TABLE market_snapshots(exchange TEXT, price REAL, open_interest REAL, oi_usd REAL, funding_rate REAL, timestamp TEXT)")
+        db.execute("CREATE TABLE market_context_snapshots(timestamp_ms INTEGER, context_json TEXT)")
+        db.execute("INSERT INTO market_context_snapshots VALUES(?,?)", (image_time, '{"cvd":{"composite_30m_btc":12},"obi":{"binance":0.1},"signal":{"bias":"BULLISH"},"support_resistance":{"support":70000},"liquidation":{"state":"BALANCED"}}'))
+        db.execute("INSERT INTO macro_events VALUES('cpi','CPI','CPI',?, '3%', '3.1%', '2.9%', 1)", (image_time,))
+    store = JournalStore(str(db_path), tmp_path / "uploads", clock=lambda: 1_800_000_000_000)
+    entry = store.create(JournalEntryRequest(source="MANUAL", occurred_ms=1_799_999_000_000, user_reason="test"))
+    store.attach_image(entry["id"], ImageRequest(mime_type="image/png", data_base64="aW1hZ2U="))
+    def fake_request(prompt, image):
+        if "Read only explicitly visible" in prompt:
+            return ('{"occurred_at":"2027-01-15T08:05:00Z","price":90123.4,"confidence":"HIGH","evidence":"截图顶部时间与价格"}', "vision-model")
+        return ("你的逻辑\n成立部分\n不足\n当时风险\n更优执行方案", "review-model")
+    service = ReviewService(store, str(db_path), requester=fake_request)
+    review = service.create_entry_review(entry["id"])
+    saved = store.get(entry["id"])
+    assert saved["image_occurred_ms"] == 1_800_000_300_000
+    assert saved["image_price"] == pytest.approx(90123.4)
+    assert '"time_source": "IMAGE"' in review["market_context"]
+    assert '"composite_30m_btc": 12' in review["market_context"]
+    assert '"event_type": "CPI"' in review["market_context"]
+
+
 def test_macro_reminders_are_once_only(tmp_path):
     db_path=tmp_path / "market.db"; now=1_800_000_000_000; init_macro_tables(str(db_path))
     store=MacroStore(str(db_path), clock=lambda: now)

@@ -24,14 +24,37 @@ class ReviewService:
         with connect(self.db_path) as db:
             rows = db.execute("""SELECT exchange,price,open_interest,oi_usd,funding_rate,timestamp
                 FROM market_snapshots ORDER BY ABS(strftime('%s', timestamp) - strftime('%s', ?)) LIMIT 3""", (timestamp,)).fetchall()
-        return {"requested_at": timestamp, "nearby_snapshots": [dict(row) for row in rows]}
+            context_row = None
+            if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='market_context_snapshots'").fetchone():
+                context_row = db.execute("SELECT timestamp_ms,context_json FROM market_context_snapshots ORDER BY ABS(timestamp_ms-?) LIMIT 1", (occurred_ms,)).fetchone()
+            macro_rows = []
+            if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='macro_events'").fetchone():
+                macro_rows = db.execute("SELECT id,title,event_type,scheduled_ms,forecast,previous,actual FROM macro_events WHERE scheduled_ms BETWEEN ? AND ? ORDER BY scheduled_ms", (occurred_ms - 86400000, occurred_ms + 86400000)).fetchall()
+        structured = None
+        if context_row:
+            try: structured = json.loads(context_row["context_json"])
+            except (TypeError, json.JSONDecodeError): structured = None
+        return {"requested_at": timestamp, "nearby_snapshots": [dict(row) for row in rows], "structured_snapshot": structured, "structured_snapshot_at_ms": context_row["timestamp_ms"] if context_row else None, "macro_events_nearby": [dict(row) for row in macro_rows]}
 
     def create_entry_review(self, entry_id):
         entry = self.store.get(entry_id)
-        context = self.market_context(entry["occurred_ms"])
         image = self._image_part(entry.get("image_path"))
+        extraction = self._image_extraction(entry, image)
+        if extraction:
+            entry = self.store.save_image_context(entry_id, extraction.get("occurred_ms"), extraction.get("price"), extraction)
+        chosen_ms = entry.get("image_occurred_ms") or entry["occurred_ms"]
+        context = self.market_context(chosen_ms)
+        context["time_source"] = "IMAGE" if entry.get("image_occurred_ms") else "USER"
+        context["user_reported_occurred_ms"] = entry["occurred_ms"]
         prompt = self._entry_prompt(entry, context)
         return self._run(entry_id, "ENTRY", None, None, context, prompt, image)
+
+    def extract_image_context(self, entry_id):
+        entry = self.store.get(entry_id)
+        extraction = self._image_extraction(entry, self._image_part(entry.get("image_path")))
+        if not extraction:
+            raise PaperError("IMAGE_FACTS_UNAVAILABLE", "No verifiable timestamp or price found in the screenshot", 422)
+        return self.store.save_image_context(entry_id, extraction.get("occurred_ms"), extraction.get("price"), extraction)
 
     def create_period_review(self, period, end_ms=None):
         if period not in {"DAILY", "WEEKLY", "MONTHLY"}: raise PaperError("INVALID_PERIOD", "Use DAILY, WEEKLY, or MONTHLY", 422)
@@ -87,11 +110,33 @@ class ReviewService:
         if not text: raise PaperError("AI_REQUEST_FAILED", "OpenAI returned no review text", 502)
         return text, model
 
+    def _image_extraction(self, entry, image):
+        if not image or entry.get("image_occurred_ms"):
+            return None
+        prompt = ("Read only explicitly visible timestamp and BTC price from this trading screenshot. "
+                  "Do not infer missing facts and do not analyze or predict price. Return only JSON with keys "
+                  "occurred_at (ISO-8601 with timezone or null), price (number or null), confidence (HIGH/MEDIUM/LOW), evidence (short Chinese text). "
+                  "Use occurred_at only when the complete date, time, and timezone are visible; otherwise null.")
+        text, _ = self.requester(prompt, image)
+        try:
+            value = json.loads(text.strip().removeprefix("```json").removesuffix("```").strip())
+        except (TypeError, json.JSONDecodeError):
+            return None
+        if not isinstance(value, dict): return None
+        result = {"confidence": str(value.get("confidence", "LOW")).upper(), "evidence": str(value.get("evidence", ""))[:500]}
+        try:
+            if value.get("price") is not None: result["price"] = float(value["price"])
+        except (TypeError, ValueError): pass
+        if result["confidence"] == "HIGH" and value.get("occurred_at"):
+            try: result["occurred_ms"] = int(datetime.fromisoformat(str(value["occurred_at"]).replace("Z", "+00:00")).timestamp() * 1000)
+            except ValueError: pass
+        return result if result.get("price") is not None or result.get("occurred_ms") else None
+
     @staticmethod
     def _entry_prompt(entry, context):
-        return ("You are a BTC trading journal reviewer. Review the user's trade rationale and psychology against the supplied market snapshot. "
-                "State supporting evidence, conflicting evidence, ignored risks, timing/risk-control lessons, and specific process improvements. "
-                "The image is contextual only. Do not forecast price, issue a buy/sell signal, or execute any action. Answer in Chinese.\n\n" + json.dumps({"entry": {k: v for k, v in entry.items() if k != "image_path"}, "market_context": context}, ensure_ascii=False, default=str))
+        return ("You are a BTC trading journal reviewer. Use only the supplied historical market and macro data to review this completed or planned trade. "
+                "Answer in Chinese with exactly these headings: 你的逻辑, 成立部分, 不足, 当时风险, 更优执行方案. "
+                "The screenshot may provide visible timestamp/price only; it is not a chart-pattern prediction task. Do not forecast price, issue a buy/sell signal, or execute any action.\n\n" + json.dumps({"entry": {k: v for k, v in entry.items() if k != "image_path"}, "market_context": context}, ensure_ascii=False, default=str))
 
     @staticmethod
     def _image_part(path):

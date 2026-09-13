@@ -56,6 +56,12 @@ def init_journal_tables(db_path=DB_PATH):
         );
         CREATE INDEX IF NOT EXISTS idx_journal_reviews_entry ON journal_reviews(entry_id, created_ms);
         """)
+        # Additive migration: preserve every existing journal row while allowing
+        # the vision layer to record what was visible in a screenshot.
+        columns = {row["name"] for row in db.execute("PRAGMA table_info(journal_entries)")}
+        for name, definition in (("image_occurred_ms", "INTEGER"), ("image_price", "REAL"), ("image_extraction", "TEXT")):
+            if name not in columns:
+                db.execute(f"ALTER TABLE journal_entries ADD COLUMN {name} {definition}")
 
 
 class JournalStore:
@@ -118,8 +124,15 @@ class JournalStore:
     def remove_image(self, entry_id):
         previous = self.get(entry_id).get("image_path")
         with connect(self.db_path) as db:
-            db.execute("UPDATE journal_entries SET image_path=NULL,updated_ms=? WHERE id=?", (self.clock(), entry_id))
+            db.execute("UPDATE journal_entries SET image_path=NULL,image_occurred_ms=NULL,image_price=NULL,image_extraction=NULL,updated_ms=? WHERE id=?", (self.clock(), entry_id))
         if previous: self._remove_private_file(previous)
+        return self.get(entry_id)
+
+    def save_image_context(self, entry_id, occurred_ms=None, price=None, extraction=None):
+        """Save image-derived facts separately from the user's own journal input."""
+        self.get(entry_id)
+        with connect(self.db_path) as db:
+            db.execute("UPDATE journal_entries SET image_occurred_ms=?,image_price=?,image_extraction=?,updated_ms=? WHERE id=?", (occurred_ms, price, json.dumps(extraction, ensure_ascii=False) if extraction else None, self.clock(), entry_id))
         return self.get(entry_id)
 
     def import_paper_trades(self, engine, account_id, limit=100):
