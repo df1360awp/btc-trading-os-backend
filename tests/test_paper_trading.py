@@ -14,7 +14,7 @@ from market.research_context import compose_research_context
 from market.risk import RiskEventRequest, RiskStore, init_risk_tables
 from market.market_analysis import MarketAnalysisStore, init_market_analysis_tables
 from market.data_health import market_data_health
-from market.app_auth import init_app_sessions, issue_session
+from market.app_auth import init_app_sessions, issue_installation_session, issue_session
 
 
 @pytest.fixture
@@ -461,5 +461,13 @@ def test_registered_fcm_device_can_receive_separate_app_session(tmp_path):
         db.execute("INSERT INTO fcm_devices VALUES('device-1','fcm-token',1)")
     init_app_sessions(str(db_path))
     session=issue_session("fcm-token",str(db_path),now_ms=1_800_000_000_000)
+    assert session["access_token"]
+    assert session["expires_ms"] > 1_800_000_000_000
+
+
+def test_single_user_installation_can_receive_limited_app_session(tmp_path):
+    db_path = tmp_path / "market.db"
+    init_app_sessions(str(db_path))
+    session = issue_installation_session("device-1", str(db_path), now_ms=1_800_000_000_000)
     assert session["access_token"]
     assert session["expires_ms"] > 1_800_000_000_000
