@@ -4,22 +4,27 @@ from market.fcm_sender import send_to_active_devices
 from market.paper_trading import require_paper_key
 from market.macro_analysis import MacroAnalysisService
 store=MacroStore("/opt/btc-trading-os/market.db")
-router=APIRouter(prefix="/macro",tags=["Macro Intelligence"],dependencies=[Depends(require_paper_key)])
-@router.post("/events",status_code=201)
-def create(request:MacroEvent): return store.create(request)
+router=APIRouter(prefix="/macro",tags=["Macro Intelligence"])
+
+# The event calendar is market research data and is safe to render before a
+# device session exists.  Mutating events and requesting AI analysis remain
+# protected by the existing device/Paper API authentication.
 @router.get("/events")
 def list_events(limit:int=Query(default=100,ge=1,le=500)): return store.list(limit)
-@router.get("/events/{event_id}")
+
+@router.post("/events",status_code=201,dependencies=[Depends(require_paper_key)])
+def create(request:MacroEvent): return store.create(request)
+@router.get("/events/{event_id}",dependencies=[Depends(require_paper_key)])
 def get_event(event_id:str): return store.get(event_id)
-@router.put("/events/{event_id}")
+@router.put("/events/{event_id}",dependencies=[Depends(require_paper_key)])
 def update(event_id:str, request:MacroUpdate): return store.update(event_id,request)
-@router.delete("/events/{event_id}")
+@router.delete("/events/{event_id}",dependencies=[Depends(require_paper_key)])
 def delete(event_id:str): return store.delete(event_id)
-@router.put("/events/{event_id}/release")
+@router.put("/events/{event_id}/release",dependencies=[Depends(require_paper_key)])
 def release(event_id:str, request:MacroRelease):
     event=store.release(event_id,request)
     try: send_to_active_devices({"alert_type":"MACRO_RELEASE","event_id":event_id,"macro_type":event["event_type"],"actual":event["actual"],"forecast":event["forecast"],"previous":event["previous"],"message":f"{event['title']} 已公布：{event['actual']}"})
     except Exception: pass
     return {"event":event,"impact_context":store.impact_context(event_id)}
-@router.post("/events/{event_id}/analysis")
+@router.post("/events/{event_id}/analysis",dependencies=[Depends(require_paper_key)])
 def analyze(event_id:str): return MacroAnalysisService().explain(store.impact_context(event_id))

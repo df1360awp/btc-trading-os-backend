@@ -120,6 +120,37 @@ def init_db():
     init_app_sessions(DB_PATH)
 
 
+def seed_macro_calendar():
+    """Idempotently seed the remaining 2026 high-impact US release calendar.
+
+    Dates/times are published US Eastern release times converted to UTC.
+    Forecast and previous values are deliberately left empty until sourced.
+    """
+    events = (
+        ("fomc-2026-09", "FOMC 利率决议与新闻发布会", "FOMC", "2026-09-16T18:00:00+00:00"),
+        ("nfp-2026-10", "美国非农就业报告（9月）", "NFP", "2026-10-02T12:30:00+00:00"),
+        ("fomc-minutes-2026-10", "FOMC 会议纪要", "FOMC", "2026-10-07T18:00:00+00:00"),
+        ("cpi-2026-10", "美国 CPI（9月）", "CPI", "2026-10-14T12:30:00+00:00"),
+        ("ppi-2026-10", "美国 PPI（9月）", "PPI", "2026-10-15T12:30:00+00:00"),
+        ("fomc-2026-10", "FOMC 利率决议与新闻发布会", "FOMC", "2026-10-28T18:00:00+00:00"),
+        ("nfp-2026-11", "美国非农就业报告（10月）", "NFP", "2026-11-06T13:30:00+00:00"),
+        ("cpi-2026-11", "美国 CPI（10月）", "CPI", "2026-11-10T13:30:00+00:00"),
+        ("ppi-2026-11", "美国 PPI（10月）", "PPI", "2026-11-13T13:30:00+00:00"),
+        ("nfp-2026-12", "美国非农就业报告（11月）", "NFP", "2026-12-04T13:30:00+00:00"),
+        ("fomc-2026-12", "FOMC 利率决议与新闻发布会", "FOMC", "2026-12-09T19:00:00+00:00"),
+        ("cpi-2026-12", "美国 CPI（11月）", "CPI", "2026-12-10T13:30:00+00:00"),
+    )
+    for event_id, title, event_type, scheduled in events:
+        try:
+            macro_store.create(MacroEvent(
+                id=event_id, title=title, event_type=event_type,
+                scheduled_ms=int(datetime.fromisoformat(scheduled).timestamp() * 1000),
+            ))
+        except PaperError as error:
+            if error.code != "MACRO_EXISTS":
+                raise
+
+
 async def fetch_binance(client):
     ticker = await client.get(
         "https://fapi.binance.com/fapi/v1/ticker/price",
@@ -416,6 +447,7 @@ def get_change(exchange, minutes):
 @app.on_event("startup")
 async def startup():
     init_db()
+    seed_macro_calendar()
 
     scheduler = AsyncIOScheduler()
     scheduler.add_job(
