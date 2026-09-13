@@ -27,4 +27,14 @@ def release(event_id:str, request:MacroRelease):
     except Exception: pass
     return {"event":event,"impact_context":store.impact_context(event_id)}
 @router.post("/events/{event_id}/analysis",dependencies=[Depends(require_paper_key)])
-def analyze(event_id:str): return MacroAnalysisService().explain(store.impact_context(event_id))
+def analyze(event_id:str):
+    impact_id, context = store.begin_impact_analysis(event_id)
+    try:
+        result=MacroAnalysisService().explain(context)
+    except Exception as error:
+        store.fail_impact_analysis(impact_id,error)
+        raise
+    return store.complete_impact_analysis(impact_id,result["analysis"],result["model"])
+
+@router.get("/impacts")
+def list_impacts(event_id:str|None=None,limit:int=Query(default=100,ge=1,le=500)): return store.list_impacts(event_id,limit)

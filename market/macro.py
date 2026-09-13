@@ -32,6 +32,8 @@ def init_macro_tables(db_path):
     with connect(db_path) as db: db.executescript("""
       CREATE TABLE IF NOT EXISTS macro_events(id TEXT PRIMARY KEY,title TEXT NOT NULL,event_type TEXT NOT NULL,scheduled_ms INTEGER NOT NULL,forecast TEXT,previous TEXT,actual TEXT,created_ms INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS macro_reminders(event_id TEXT NOT NULL,kind TEXT NOT NULL,sent_ms INTEGER NOT NULL,PRIMARY KEY(event_id,kind));
+      CREATE TABLE IF NOT EXISTS macro_impacts(id TEXT PRIMARY KEY,event_id TEXT NOT NULL,status TEXT NOT NULL,context_json TEXT NOT NULL,analysis TEXT,model TEXT,created_ms INTEGER NOT NULL,completed_ms INTEGER,FOREIGN KEY(event_id) REFERENCES macro_events(id));
+      CREATE INDEX IF NOT EXISTS idx_macro_impacts_event ON macro_impacts(event_id,created_ms);
     """)
 
 
@@ -72,7 +74,39 @@ class MacroStore:
         event=self.get(event_id)
         with connect(self.db_path) as db:
             rows=db.execute("SELECT exchange,price,open_interest,oi_usd,funding_rate,timestamp FROM market_snapshots ORDER BY ABS(strftime('%s',timestamp)-?) LIMIT 3", (event["scheduled_ms"] // 1000,)).fetchall()
-        return {"event":event,"nearby_market_snapshots":[dict(row) for row in rows]}
+            structured_row = None
+            if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='market_context_snapshots'").fetchone():
+                structured_row = db.execute("SELECT timestamp_ms,context_json FROM market_context_snapshots ORDER BY ABS(timestamp_ms-?) LIMIT 1", (event["scheduled_ms"],)).fetchone()
+        structured = None
+        if structured_row:
+            try: structured=json.loads(structured_row["context_json"])
+            except (TypeError, json.JSONDecodeError): pass
+        return {"event":event,"nearby_market_snapshots":[dict(row) for row in rows],"structured_market_context":structured,"structured_market_context_at_ms":structured_row["timestamp_ms"] if structured_row else None}
+
+    def begin_impact_analysis(self, event_id):
+        event=self.get(event_id)
+        if event["actual"] is None: raise PaperError("MACRO_NOT_RELEASED", "Record actual data before impact analysis", 422)
+        impact_id=str(uuid.uuid4()); now=self.clock(); context=self.impact_context(event_id)
+        with connect(self.db_path) as db:
+            db.execute("INSERT INTO macro_impacts(id,event_id,status,context_json,created_ms) VALUES(?,?,?,?,?)", (impact_id,event_id,"RUNNING",json.dumps(context,ensure_ascii=False,default=str),now))
+        return impact_id, context
+
+    def complete_impact_analysis(self, impact_id, analysis, model):
+        with connect(self.db_path) as db:
+            db.execute("UPDATE macro_impacts SET status='COMPLETED',analysis=?,model=?,completed_ms=? WHERE id=?", (analysis,model,self.clock(),impact_id))
+            row=db.execute("SELECT * FROM macro_impacts WHERE id=?",(impact_id,)).fetchone()
+        return dict(row)
+
+    def fail_impact_analysis(self, impact_id, error):
+        with connect(self.db_path) as db:
+            db.execute("UPDATE macro_impacts SET status='FAILED',analysis=?,completed_ms=? WHERE id=?", (str(error)[:1000],self.clock(),impact_id))
+
+    def list_impacts(self, event_id=None, limit=100):
+        query, params="SELECT * FROM macro_impacts", []
+        if event_id: query += " WHERE event_id=?"; params.append(event_id)
+        query += " ORDER BY created_ms DESC LIMIT ?"; params.append(limit)
+        with connect(self.db_path) as db: rows=db.execute(query,params).fetchall()
+        return [dict(row) for row in rows]
     def due(self, now_ms):
         windows={"T24H":86400000,"T1H":3600000}; result=[]
         with connect(self.db_path) as db:

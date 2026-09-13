@@ -306,6 +306,22 @@ def test_macro_release_keeps_actual_and_market_context(tmp_path):
     assert store.impact_context(event["id"])["event"]["forecast"] == "3%"
 
 
+def test_macro_impact_analysis_is_persisted_with_structured_context(tmp_path):
+    db_path=tmp_path / "market.db"; now=1_800_000_000_000; init_macro_tables(str(db_path))
+    with connect(str(db_path)) as db:
+        db.execute("CREATE TABLE market_snapshots(exchange TEXT,price REAL,open_interest REAL,oi_usd REAL,funding_rate REAL,timestamp TEXT)")
+        db.execute("CREATE TABLE market_context_snapshots(timestamp_ms INTEGER,context_json TEXT)")
+        db.execute("INSERT INTO market_context_snapshots VALUES(?,?)",(now,'{"cvd":{"composite_30m_btc":5},"obi":{"binance":0.2}}'))
+    store=MacroStore(str(db_path),clock=lambda:now)
+    event=store.create(MacroEvent(title="US CPI",event_type="CPI",scheduled_ms=now,forecast="3%",previous="3.1%"))
+    store.release(event["id"],MacroRelease(actual="2.9%"))
+    impact_id,context=store.begin_impact_analysis(event["id"])
+    saved=store.complete_impact_analysis(impact_id,"宏观复盘","test-model")
+    assert saved["status"] == "COMPLETED"
+    assert '"composite_30m_btc": 5' in saved["context_json"]
+    assert store.list_impacts(event["id"])[0]["analysis"] == "宏观复盘"
+
+
 def test_macro_event_can_update_or_delete_before_release(tmp_path):
     db_path=tmp_path / "market.db"; init_macro_tables(str(db_path)); store=MacroStore(str(db_path))
     event=store.create(MacroEvent(title="US CPI",event_type="CPI",scheduled_ms=1_800_000_000_000))
