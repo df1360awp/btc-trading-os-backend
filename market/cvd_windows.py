@@ -50,7 +50,8 @@ def get_all_cvd_windows():
     exchanges = [
     "binance",
     "bybit",
-    "okx"
+    "okx",
+    "hyperliquid",
 ]
 
     windows = {

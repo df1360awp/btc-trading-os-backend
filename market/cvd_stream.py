@@ -71,6 +71,31 @@ async def binance_liquidation_stream():
             print("Binance liquidation WS error:", e); await asyncio.sleep(5)
 
 
+async def hyperliquid_trade_stream():
+    """Persist public BTC perpetual trades for Hyperliquid CVD windows."""
+    url = "wss://api.hyperliquid.xyz/ws"
+    subscription = {"method": "subscribe", "subscription": {"type": "trades", "coin": "BTC"}}
+    while True:
+        try:
+            async with websockets.connect(url, ping_interval=20, ping_timeout=20) as ws:
+                await ws.send(json.dumps(subscription))
+                async for message in ws:
+                    payload = json.loads(message)
+                    if payload.get("channel") != "trades":
+                        continue
+                    for trade in payload.get("data") or []:
+                        if trade.get("coin") != "BTC":
+                            continue
+                        side = "buy" if trade.get("side") == "B" else "sell"
+                        trade_id = trade.get("tid") or trade.get("hash")
+                        if trade_id is None:
+                            continue
+                        save_trade("hyperliquid", str(trade_id), trade.get("time"), side,
+                                   float(trade.get("sz", 0)), float(trade.get("px", 0)))
+        except Exception as e:
+            print("Hyperliquid trade WS error:", e); await asyncio.sleep(5)
+
+
 def save_trade(
     exchange,
     trade_id,
@@ -294,7 +319,8 @@ async def run_cvd_streams():
         binance_rest_stream(),
         binance_liquidation_stream(),
         bybit_stream(),
-        okx_stream()
+        okx_stream(),
+        hyperliquid_trade_stream(),
     )
 
 

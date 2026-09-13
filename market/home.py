@@ -21,7 +21,7 @@ def build_home_payload(state, signal, support_levels, liquidation, macro, risks)
     order_flow = []
     sources = state.get("obi", {}).get("sources", {})
     cvd_windows = state.get("cvd", {})
-    for exchange in ("binance", "bybit", "okx"):
+    for exchange in ("binance", "bybit", "okx", "hyperliquid"):
         obi = (sources.get(exchange) or {}).get("obi")
         cvd_30m = (cvd_windows.get(exchange) or {}).get("30m", {}).get("cvd_btc")
         order_flow.append({

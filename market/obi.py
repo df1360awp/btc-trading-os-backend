@@ -106,6 +106,31 @@ async def fetch_okx_obi(client: httpx.AsyncClient):
     }
 
 
+async def fetch_hyperliquid_obi(client: httpx.AsyncClient):
+    """Read the public Hyperliquid BTC perpetual order book.
+
+    Hyperliquid's information API is public.  Only the visible L2 book is
+    used here, exactly as for the other OBI sources; no account or order API
+    is involved.
+    """
+    response = await client.post(
+        "https://api.hyperliquid.xyz/info",
+        json={"type": "l2Book", "coin": "BTC"},
+        timeout=10,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    levels = payload.get("levels") or []
+    if len(levels) < 2:
+        raise RuntimeError("Hyperliquid returned no BTC L2 levels")
+
+    def normalize(book):
+        return [[item["px"], item["sz"]] for item in book[:20]]
+
+    result = calculate_obi(normalize(levels[0]), normalize(levels[1]))
+    return {"exchange": "hyperliquid", **result}
+
+
 async def fetch_all_obi():
     results = {}
     errors = []
@@ -115,6 +140,7 @@ async def fetch_all_obi():
             ("binance", fetch_binance_obi),
             ("bybit", fetch_bybit_obi),
             ("okx", fetch_okx_obi),
+            ("hyperliquid", fetch_hyperliquid_obi),
         ]
 
         for name, func in sources:
