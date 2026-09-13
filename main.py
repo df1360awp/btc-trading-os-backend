@@ -22,7 +22,7 @@ from market.paper_api import router as paper_router
 from market.paper_trading import AccountRequest, PaperError, init_paper_tables
 from market.journal import init_journal_tables
 from market.journal_api import router as journal_router
-from market.macro import MacroEvent, MacroStore, init_macro_tables
+from market.macro import MacroEvent, MacroStore, init_macro_tables, parse_bls_rss
 from market.macro_api import router as macro_router
 from market.risk import RiskEventRequest, RiskStore, init_risk_tables
 from market.risk_api import router as risk_router
@@ -75,6 +75,22 @@ async def check_macro_reminders():
         print("Macro reminder error:", repr(error))
 
 
+async def check_official_macro_releases():
+    """Ingest official BLS RSS releases; unknown formats never update Actual."""
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            response=await client.get("https://www.bls.gov/feed/bls_latest.rss")
+            response.raise_for_status(); releases=parse_bls_rss(response.content)
+        for item in releases:
+            record, created=macro_store.ingest_official_release("BLS",item["title"],item["url"],item["published_ms"],item["description"])
+            if created and record["event_id"] and record["extracted_actual"]:
+                try:
+                    await asyncio.to_thread(send_to_active_devices,{"alert_type":"MACRO_RELEASE","event_id":record["event_id"],"actual":record["extracted_actual"],"source":"BLS","message":record["title"]})
+                except Exception: pass
+    except Exception as error:
+        print("Official macro release monitor error:", repr(error))
+
+
 async def check_sudden_risks():
     """Poll a public news index, then alert only new high-severity items."""
     if os.getenv("RISK_NEWS_ENABLED", "true").lower() not in {"1", "true", "yes"}:
@@ -101,6 +117,8 @@ async def run_scheduled_journal_review(period):
     try:
         from market.ai_review import ReviewService
         review, created = await asyncio.to_thread(ReviewService(journal_store, DB_PATH).create_scheduled_period_review, period)
+        if not review:
+            return
         context = json.loads(review["market_context"])
         if created and context.get("entry_count", 0):
             await asyncio.to_thread(send_to_active_devices, {"alert_type": "JOURNAL_REVIEW", "period": period,
@@ -574,6 +592,7 @@ async def startup():
         max_instances=1
     )
     scheduler.add_job(check_macro_reminders, "interval", minutes=5, max_instances=1)
+    scheduler.add_job(check_official_macro_releases, "interval", minutes=20, max_instances=1)
     scheduler.add_job(check_sudden_risks, "interval", minutes=10, max_instances=1)
     scheduler.add_job(run_scheduled_journal_review, CronTrigger(hour=0, minute=15, timezone="Asia/Shanghai"), args=["DAILY"], max_instances=1)
     scheduler.add_job(run_scheduled_journal_review, CronTrigger(day_of_week="mon", hour=0, minute=25, timezone="Asia/Shanghai"), args=["WEEKLY"], max_instances=1)

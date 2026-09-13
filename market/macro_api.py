@@ -38,3 +38,6 @@ def analyze(event_id:str):
 
 @router.get("/impacts")
 def list_impacts(event_id:str|None=None,limit:int=Query(default=100,ge=1,le=500)): return store.list_impacts(event_id,limit)
+
+@router.get("/source-releases")
+def list_source_releases(limit:int=Query(default=100,ge=1,le=500)): return store.source_releases(limit)

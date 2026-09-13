@@ -7,7 +7,7 @@ from market.paper_strategies import StrategyRunner
 from market.liquidation import liquidation_map, liquidation_pressure
 from market.journal import ImageRequest, JournalEntryRequest, JournalStore, init_journal_tables
 from market.ai_review import ReviewService
-from market.macro import MacroEvent, MacroRelease, MacroStore, MacroUpdate, init_macro_tables
+from market.macro import MacroEvent, MacroRelease, MacroStore, MacroUpdate, init_macro_tables, parse_bls_rss
 from market.market_analysis import MarketAnalysisService
 from market.macro_analysis import MacroAnalysisService
 from market.research_context import compose_research_context
@@ -303,6 +303,15 @@ def test_scheduled_period_review_is_idempotent_per_calendar_day(tmp_path):
     assert created and not created_again and first["id"] == second["id"]
 
 
+def test_scheduled_period_review_skips_empty_period_without_ai_request(tmp_path):
+    db_path=tmp_path / "market.db"; init_journal_tables(str(db_path))
+    store=JournalStore(str(db_path),tmp_path / "uploads")
+    calls=[]
+    service=ReviewService(store,str(db_path),requester=lambda prompt,image: calls.append(prompt))
+    review,created=service.create_scheduled_period_review("DAILY",1_800_000_001_000)
+    assert review is None and not created and calls == []
+
+
 def test_vision_review_uses_verified_image_time_and_full_market_context(tmp_path):
     db_path = tmp_path / "market.db"; init_journal_tables(str(db_path)); init_macro_tables(str(db_path))
     image_time = 1_799_999_500_000
@@ -367,6 +376,21 @@ def test_macro_event_can_update_or_delete_before_release(tmp_path):
     event=store.create(MacroEvent(title="US CPI",event_type="CPI",scheduled_ms=1_800_000_000_000))
     assert store.update(event["id"],MacroUpdate(title="US Core CPI",event_type="CORE_CPI",scheduled_ms=1_800_000_100_000))["event_type"] == "CORE_CPI"
     assert store.delete(event["id"]) == {"id":event["id"],"deleted":True}
+
+
+def test_official_bls_release_is_parsed_matched_and_deduplicated(tmp_path):
+    db_path=tmp_path / "market.db"; now=1_800_000_000_000; init_macro_tables(str(db_path))
+    store=MacroStore(str(db_path),clock=lambda:now)
+    event=store.create(MacroEvent(title="US CPI",event_type="CPI",scheduled_ms=now))
+    record,created=store.ingest_official_release("BLS","Consumer Price Index rose 0.3 percent","https://bls.test/cpi",now,"official text")
+    assert created and record["event_id"] == event["id"] and record["extracted_actual"] == "0.3%"
+    assert store.get(event["id"])["actual"] == "0.3%"
+    assert not store.ingest_official_release("BLS","Consumer Price Index rose 0.3 percent","https://bls.test/cpi",now,"official text")[1]
+
+
+def test_bls_rss_parser_extracts_items():
+    feed=b"<rss><channel><item><title>Consumer Price Index rose 0.3 percent</title><link>https://bls.test/cpi</link><description>x</description><pubDate>Fri, 11 Sep 2026 12:30:00 GMT</pubDate></item></channel></rss>"
+    assert parse_bls_rss(feed)[0]["url"] == "https://bls.test/cpi"
 
 
 def test_market_ai_explains_context_without_becoming_executor():

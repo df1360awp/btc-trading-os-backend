@@ -64,6 +64,8 @@ class ReviewService:
         with connect(self.db_path) as db:
             rows = db.execute("SELECT * FROM journal_entries WHERE occurred_ms BETWEEN ? AND ? ORDER BY occurred_ms", (start_ms, end_ms)).fetchall()
         entries = [dict(row) for row in rows]
+        if not entries:
+            raise PaperError("NO_JOURNAL_DATA", "No trades or journal records exist for this review period", 422)
         context = {"period": period, "entries": entries, "entry_count": len(entries)}
         prompt = ("You are a BTC trading journal reviewer. Produce a concise Chinese review of the user's "
                   f"{period.lower()} period. Identify repeatable strengths, mistakes, psychological patterns, risk control lessons, and 3 practical improvements. "
@@ -79,7 +81,12 @@ class ReviewService:
                 AND status='COMPLETED' AND period_end_ms BETWEEN ? AND ? ORDER BY created_ms DESC LIMIT 1""", (period, day_start, day_start + 86_400_000 - 1)).fetchone()
         if row:
             return dict(row), False
-        return self.create_period_review(period, end_ms), True
+        try:
+            return self.create_period_review(period, end_ms), True
+        except PaperError as error:
+            if error.code == "NO_JOURNAL_DATA":
+                return None, False
+            raise
 
     def _run(self, entry_id, period, start_ms, end_ms, context, prompt, image):
         review_id, now = str(uuid.uuid4()), self.clock()

@@ -1,7 +1,11 @@
 """Scheduled macro-event calendar and idempotent FCM reminder delivery."""
 import json
+import re
 import time
 import uuid
+import xml.etree.ElementTree as ET
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from pydantic import BaseModel, ConfigDict, Field
 from market.paper_trading import PaperError, connect
 
@@ -34,6 +38,8 @@ def init_macro_tables(db_path):
       CREATE TABLE IF NOT EXISTS macro_reminders(event_id TEXT NOT NULL,kind TEXT NOT NULL,sent_ms INTEGER NOT NULL,PRIMARY KEY(event_id,kind));
       CREATE TABLE IF NOT EXISTS macro_impacts(id TEXT PRIMARY KEY,event_id TEXT NOT NULL,status TEXT NOT NULL,context_json TEXT NOT NULL,analysis TEXT,model TEXT,created_ms INTEGER NOT NULL,completed_ms INTEGER,FOREIGN KEY(event_id) REFERENCES macro_events(id));
       CREATE INDEX IF NOT EXISTS idx_macro_impacts_event ON macro_impacts(event_id,created_ms);
+      CREATE TABLE IF NOT EXISTS macro_source_releases(id TEXT PRIMARY KEY,source TEXT NOT NULL,title TEXT NOT NULL,url TEXT NOT NULL UNIQUE,published_ms INTEGER NOT NULL,event_id TEXT,extracted_actual TEXT,confidence TEXT NOT NULL,raw_text TEXT,created_ms INTEGER NOT NULL,FOREIGN KEY(event_id) REFERENCES macro_events(id));
+      CREATE INDEX IF NOT EXISTS idx_macro_source_event ON macro_source_releases(event_id,published_ms DESC);
     """)
 
 
@@ -70,6 +76,31 @@ class MacroStore:
             db.execute("UPDATE macro_events SET actual=? WHERE id=?", (request.actual, event_id))
             row=db.execute("SELECT * FROM macro_events WHERE id=?", (event_id,)).fetchone()
         return dict(row)
+
+    def ingest_official_release(self, source, title, url, published_ms, raw_text=""):
+        event_type, actual = parse_official_release(title, raw_text)
+        confidence = "HIGH" if event_type and actual else "UNPARSED"
+        with connect(self.db_path) as db:
+            old=db.execute("SELECT * FROM macro_source_releases WHERE url=?",(url,)).fetchone()
+            if old: return dict(old), False
+            event=None
+            if event_type:
+                event=db.execute("""SELECT * FROM macro_events WHERE event_type=? AND scheduled_ms BETWEEN ? AND ?
+                    ORDER BY ABS(scheduled_ms-?) LIMIT 1""",(event_type,published_ms-3*86400000,published_ms+86400000,published_ms)).fetchone()
+            item={"id":str(uuid.uuid4()),"source":source,"title":title[:500],"url":url,"published_ms":published_ms,"event_id":event["id"] if event else None,"extracted_actual":actual,"confidence":confidence,"raw_text":raw_text[:8000],"created_ms":self.clock()}
+            db.execute("""INSERT INTO macro_source_releases(id,source,title,url,published_ms,event_id,extracted_actual,confidence,raw_text,created_ms)
+                VALUES(:id,:source,:title,:url,:published_ms,:event_id,:extracted_actual,:confidence,:raw_text,:created_ms)""",item)
+            if event and actual and event["actual"] is None:
+                db.execute("UPDATE macro_events SET actual=? WHERE id=?",(actual,event["id"]))
+        return self.source_release(item["id"]), True
+
+    def source_release(self, release_id):
+        with connect(self.db_path) as db: row=db.execute("SELECT * FROM macro_source_releases WHERE id=?",(release_id,)).fetchone()
+        return dict(row)
+
+    def source_releases(self, limit=100):
+        with connect(self.db_path) as db: rows=db.execute("SELECT * FROM macro_source_releases ORDER BY published_ms DESC LIMIT ?",(limit,)).fetchall()
+        return [dict(row) for row in rows]
     def impact_context(self, event_id):
         event=self.get(event_id)
         with connect(self.db_path) as db:
@@ -123,3 +154,30 @@ class MacroStore:
             sender({"alert_type":"MACRO","event_id":event["id"],"macro_type":event["event_type"],"reminder":kind,"message":f"{event['title']} 将在 {kind[1:]} 后公布"})
             self.mark_sent(event["id"],kind); sent.append({"event_id":event["id"],"kind":kind})
         return sent
+
+
+def parse_official_release(title, text=""):
+    """Conservative BLS headline parser; unknown formats remain unparsed."""
+    value=(title+" "+text).lower()
+    if "consumer price index" in value:
+        match=re.search(r"(?:rose|increased|up)\s+([0-9]+(?:\.[0-9]+)?)\s+percent",value)
+        return "CPI", f"{match.group(1)}%" if match else None
+    if "producer price index" in value or "ppi for final demand" in value:
+        match=re.search(r"(?:rose|increased|up)\s+([0-9]+(?:\.[0-9]+)?)\s+percent",value)
+        return "PPI", f"{match.group(1)}%" if match else None
+    if "payroll employment" in value or "employment situation" in value:
+        match=re.search(r"(?:increased|rose)\s+by\s+([0-9,]+)|(?:decreased|fell)\s+by\s+([0-9,]+)",value)
+        if match: return "NFP", ("-" if match.group(2) else "") + (match.group(1) or match.group(2))
+        return "NFP", None
+    return None, None
+
+
+def parse_bls_rss(payload):
+    root=ET.fromstring(payload); items=[]
+    for item in root.findall(".//item"):
+        title=(item.findtext("title") or "").strip(); url=(item.findtext("link") or "").strip(); description=(item.findtext("description") or "").strip(); published=item.findtext("pubDate")
+        if not title or not url or not published: continue
+        try: published_ms=int(parsedate_to_datetime(published).astimezone(timezone.utc).timestamp()*1000)
+        except (TypeError,ValueError): continue
+        items.append({"title":title,"url":url,"description":description,"published_ms":published_ms})
+    return items
