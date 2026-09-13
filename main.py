@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import sqlite3
 from datetime import datetime, timezone, timedelta
 
@@ -22,6 +23,8 @@ from market.journal import init_journal_tables
 from market.journal_api import router as journal_router
 from market.macro import MacroEvent, MacroStore, init_macro_tables
 from market.macro_api import router as macro_router
+from market.risk import RiskEventRequest, RiskStore, init_risk_tables
+from market.risk_api import router as risk_router
 from market.fcm_sender import send_to_active_devices
 from market.market_analysis import MarketAnalysisService
 from market.research_context import compose_research_context
@@ -49,6 +52,7 @@ app.include_router(fcm_router)
 app.include_router(paper_router)
 app.include_router(journal_router)
 app.include_router(macro_router)
+app.include_router(risk_router)
 app.include_router(app_router)
 
 
@@ -59,6 +63,7 @@ async def paper_error_handler(request: Request, exc: PaperError):
 DB_PATH = "/opt/btc-trading-os/market.db"
 macro_store = MacroStore(DB_PATH)
 journal_store = JournalStore(DB_PATH)
+risk_store = RiskStore(DB_PATH)
 
 
 async def check_macro_reminders():
@@ -66,6 +71,27 @@ async def check_macro_reminders():
         await asyncio.to_thread(macro_store.send_due, send_to_active_devices)
     except Exception as error:
         print("Macro reminder error:", repr(error))
+
+
+async def check_sudden_risks():
+    """Poll a public news index, then alert only new high-severity items."""
+    if os.getenv("RISK_NEWS_ENABLED", "true").lower() not in {"1", "true", "yes"}:
+        return
+    query = '(bitcoin OR cryptocurrency) AND (hack OR exploit OR outage OR sanctions OR war OR "bank failure")'
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.get("https://api.gdeltproject.org/api/v2/doc/doc", params={"query": query, "mode": "artlist", "format": "json", "maxrecords": 25, "format": "json"})
+            response.raise_for_status(); articles=response.json().get("articles",[])
+        now_ms=int(datetime.now(timezone.utc).timestamp()*1000)
+        for article in articles:
+            title=str(article.get("title","")).strip(); url=str(article.get("url","")).strip()
+            if not title or not url: continue
+            event, created=risk_store.ingest(RiskEventRequest(source="GDELT",headline=title,url=url,published_ms=now_ms,summary=str(article.get("domain", ""))),raw=article)
+            if created and event["severity"] in {"HIGH","CRITICAL"} and risk_store.needs_delivery(event["id"]):
+                result=await asyncio.to_thread(send_to_active_devices,{"alert_type":"SUDDEN_RISK","event_id":event["id"],"severity":event["severity"],"category":event["category"],"message":event["headline"][:300]})
+                if result.get("failed",0)==0: risk_store.mark_delivered(event["id"])
+    except Exception as error:
+        print("Sudden risk monitor error:", repr(error))
 
 
 def ensure_default_system_paper_strategy(price):
@@ -150,6 +176,7 @@ def init_db():
     init_paper_tables(DB_PATH)
     init_journal_tables(DB_PATH)
     init_macro_tables(DB_PATH)
+    init_risk_tables(DB_PATH)
     init_app_sessions(DB_PATH)
 
 
@@ -521,6 +548,7 @@ async def startup():
         max_instances=1
     )
     scheduler.add_job(check_macro_reminders, "interval", minutes=5, max_instances=1)
+    scheduler.add_job(check_sudden_risks, "interval", minutes=10, max_instances=1)
     scheduler.start()
 
     await collect_market_snapshot()

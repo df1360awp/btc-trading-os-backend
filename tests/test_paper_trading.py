@@ -11,6 +11,7 @@ from market.macro import MacroEvent, MacroRelease, MacroStore, MacroUpdate, init
 from market.market_analysis import MarketAnalysisService
 from market.macro_analysis import MacroAnalysisService
 from market.research_context import compose_research_context
+from market.risk import RiskEventRequest, RiskStore, init_risk_tables
 from market.data_health import market_data_health
 from market.app_auth import init_app_sessions, issue_session
 
@@ -373,6 +374,19 @@ def test_market_data_health_marks_fresh_sources(tmp_path):
     result=market_data_health(str(db_path),now)
     assert result["market_status"] == "FRESH"
     assert result["liquidation_events"]["count"] == 1
+
+
+def test_sudden_risk_events_are_classified_deduplicated_and_delivered_once(tmp_path):
+    db_path=tmp_path / "market.db"; init_risk_tables(str(db_path))
+    store=RiskStore(str(db_path),clock=lambda:1_800_000_000_000)
+    request=RiskEventRequest(source="test",headline="Major exchange hack reported",url="https://example.test/a",published_ms=1_800_000_000_000)
+    event,created=store.ingest(request)
+    assert created and event["severity"] == "CRITICAL"
+    duplicate,created=store.ingest(request)
+    assert not created and duplicate["id"] == event["id"]
+    assert store.needs_delivery(event["id"])
+    store.mark_delivered(event["id"])
+    assert not store.needs_delivery(event["id"])
 
 
 def test_registered_fcm_device_can_receive_separate_app_session(tmp_path):
