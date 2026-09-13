@@ -866,6 +866,14 @@ async def btc_home():
                               macro_store.intelligence_context(), risk_store.list(5))
 
 
+@app.get("/market/macro/{symbol}/history")
+async def macro_market_history(symbol: str, period: str = "1h"):
+    allowed={"SP500_FUTURES","NASDAQ100_FUTURES","US10Y","DXY"}
+    if symbol not in allowed:
+        return JSONResponse(status_code=422, content={"error":"INVALID_SYMBOL","detail":"unsupported macro market symbol"})
+    return macro_store.market_history(symbol, period)
+
+
 @app.get("/market/btc/data-health")
 async def btc_data_health(): return market_data_health(DB_PATH)
 

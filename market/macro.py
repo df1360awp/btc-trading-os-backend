@@ -127,6 +127,28 @@ class MacroStore:
                 if value is not None: db.execute("INSERT INTO macro_market_snapshots(timestamp_ms,symbol,value,source) VALUES(?,?,?,?)",(now,symbol,float(value),source))
         return values
 
+    def market_quotes(self):
+        """Latest quote plus prior saved point for an explainable price change."""
+        with connect(self.db_path) as db:
+            symbols=db.execute("SELECT DISTINCT symbol FROM macro_market_snapshots").fetchall()
+            result=[]
+            for row in symbols:
+                points=db.execute("SELECT value,source,timestamp_ms FROM macro_market_snapshots WHERE symbol=? ORDER BY timestamp_ms DESC LIMIT 2",(row["symbol"],)).fetchall()
+                if not points: continue
+                latest=dict(points[0]); previous=float(points[1]["value"]) if len(points)>1 else None
+                latest["symbol"]=row["symbol"]
+                latest["change_pct"]=(float(latest["value"])-previous)/previous*100 if previous else None
+                result.append(latest)
+        return result
+
+    def market_history(self, symbol, period, now_ms=None):
+        windows={"1m":3600000,"1h":86400000,"1d":30*86400000}
+        if period not in windows: raise PaperError("INVALID_PERIOD","period must be 1m, 1h, or 1d",422)
+        now=now_ms or self.clock()
+        with connect(self.db_path) as db:
+            rows=db.execute("SELECT timestamp_ms,value,source FROM macro_market_snapshots WHERE symbol=? AND timestamp_ms>=? ORDER BY timestamp_ms",(symbol,now-windows[period])).fetchall()
+        return {"symbol":symbol,"period":period,"points":[dict(row) for row in rows]}
+
     def save_impact_rating(self,event_id,rating,bias,analysis,model,context):
         item={"id":str(uuid.uuid4()),"event_id":event_id,"rating":int(rating),"bias":bias,"analysis":analysis,"model":model,"context_json":json.dumps(context,ensure_ascii=False,default=str),"created_ms":self.clock()}
         with connect(self.db_path) as db: db.execute("INSERT INTO macro_impact_ratings(id,event_id,rating,bias,analysis,model,context_json,created_ms) VALUES(:id,:event_id,:rating,:bias,:analysis,:model,:context_json,:created_ms)",item)
@@ -136,10 +158,8 @@ class MacroStore:
         now=now_ms or self.clock()
         with connect(self.db_path) as db:
             events=db.execute("SELECT * FROM macro_events WHERE scheduled_ms BETWEEN ? AND ? ORDER BY scheduled_ms",(now-24*3600000,now+24*3600000)).fetchall()
-            markets=db.execute("""SELECT m.symbol,m.value,m.source,m.timestamp_ms FROM macro_market_snapshots m
-                WHERE m.timestamp_ms=(SELECT MAX(x.timestamp_ms) FROM macro_market_snapshots x WHERE x.symbol=m.symbol)""").fetchall()
             ratings=db.execute("SELECT event_id,rating,bias,analysis,created_ms FROM macro_impact_ratings ORDER BY created_ms DESC LIMIT 10").fetchall()
-        return {"events_nearby":[dict(row) for row in events],"markets":[dict(row) for row in markets],"recent_ratings":[dict(row) for row in ratings]}
+        return {"events_nearby":[dict(row) for row in events],"markets":self.market_quotes(),"recent_ratings":[dict(row) for row in ratings]}
 
     def begin_impact_analysis(self, event_id):
         event=self.get(event_id)

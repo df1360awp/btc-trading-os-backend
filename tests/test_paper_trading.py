@@ -247,6 +247,16 @@ def test_liquidation_map_groups_observed_events_by_price_level(tmp_path):
     assert result["levels"][0]["short_liquidation_usd"] == 140220
 
 
+def test_macro_quotes_and_history_include_saved_change(tmp_path):
+    db_path=tmp_path / "market.db"; now=1_800_000_000_000
+    init_macro_tables(str(db_path)); store=MacroStore(str(db_path),clock=lambda:now)
+    store.save_macro_markets({"DXY":100}, timestamp_ms=now-1_000)
+    store.save_macro_markets({"DXY":101}, timestamp_ms=now)
+    quote=store.market_quotes()[0]
+    assert quote["symbol"] == "DXY" and quote["change_pct"] == pytest.approx(1)
+    assert len(store.market_history("DXY","1m",now)["points"]) == 2
+
+
 def test_journal_keeps_reason_psychology_and_private_image(tmp_path):
     db_path = tmp_path / "market.db"
     init_journal_tables(str(db_path))
