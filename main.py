@@ -76,17 +76,19 @@ async def check_macro_reminders():
 
 
 async def check_official_macro_releases():
-    """Ingest official BLS RSS releases; unknown formats never update Actual."""
+    """Ingest official BLS/BEA/Federal Reserve releases conservatively."""
     try:
         async with httpx.AsyncClient(timeout=20) as client:
-            response=await client.get("https://www.bls.gov/feed/bls_latest.rss")
-            response.raise_for_status(); releases=parse_bls_rss(response.content)
-        for item in releases:
-            record, created=macro_store.ingest_official_release("BLS",item["title"],item["url"],item["published_ms"],item["description"])
-            if created and record["event_id"] and record["extracted_actual"]:
-                try:
-                    await asyncio.to_thread(send_to_active_devices,{"alert_type":"MACRO_RELEASE","event_id":record["event_id"],"actual":record["extracted_actual"],"source":"BLS","message":record["title"]})
-                except Exception: pass
+            sources=(("BLS","https://www.bls.gov/feed/bls_latest.rss"),("BEA",os.getenv("BEA_RSS_URL","https://apps.bea.gov/rss/rss.xml")),("FEDERAL_RESERVE",os.getenv("FED_RSS_URL","https://www.federalreserve.gov/feeds/press_all.xml")))
+            responses=await asyncio.gather(*[client.get(url) for _,url in sources],return_exceptions=True)
+        for (source,_), response in zip(sources,responses):
+            if isinstance(response,Exception) or response.status_code >= 400: continue
+            for item in parse_bls_rss(response.content):
+                record, created=macro_store.ingest_official_release(source,item["title"],item["url"],item["published_ms"],item["description"])
+                if created and record["event_id"] and record["extracted_actual"]:
+                    try:
+                        await asyncio.to_thread(send_to_active_devices,{"alert_type":"MACRO_RELEASE","event_id":record["event_id"],"actual":record["extracted_actual"],"source":source,"message":record["title"]})
+                    except Exception: pass
     except Exception as error:
         print("Official macro release monitor error:", repr(error))
 

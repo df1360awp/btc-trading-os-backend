@@ -169,6 +169,15 @@ def parse_official_release(title, text=""):
         match=re.search(r"(?:increased|rose)\s+by\s+([0-9,]+)|(?:decreased|fell)\s+by\s+([0-9,]+)",value)
         if match: return "NFP", ("-" if match.group(2) else "") + (match.group(1) or match.group(2))
         return "NFP", None
+    if "fomc statement" in value or "federal reserve issues fomc" in value:
+        match=re.search(r"target range.*?(\d+(?:\.\d+)?)\s*(?:to|-)\s*(\d+(?:\.\d+)?)\s+percent",value)
+        return "FOMC", f"{match.group(1)}%-{match.group(2)}%" if match else None
+    if "gross domestic product" in value or "gdp (" in value:
+        match=re.search(r"(?:increased|grew).*?([0-9]+(?:\.[0-9]+)?)\s+percent",value)
+        return "GDP", f"{match.group(1)}%" if match else None
+    if "personal income and outlays" in value or "personal consumption expenditures" in value:
+        match=re.search(r"(?:rose|increased).*?([0-9]+(?:\.[0-9]+)?)\s+percent",value)
+        return "PCE", f"{match.group(1)}%" if match else None
     return None, None
 
 
