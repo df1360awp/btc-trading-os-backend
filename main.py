@@ -102,14 +102,22 @@ async def collect_macro_markets():
     """Store public reference markets used only for macro explanation."""
     symbols={"SP500_FUTURES":"ES=F","NASDAQ100_FUTURES":"NQ=F","DXY":"DX-Y.NYB","US10Y":"^TNX","GOLD":"GC=F","OIL":"CL=F"}
     values={}
-    try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            for name,symbol in symbols.items():
+    async def fetch_one(client, name, symbol):
+        try:
                 response=await client.get(f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}",params={"range":"5d","interval":"1d"})
                 response.raise_for_status(); result=response.json().get("chart",{}).get("result") or []
                 close=(result[0].get("meta",{}).get("regularMarketPrice") if result else None)
-                if close is not None: values[name]=close
-        macro_store.save_macro_markets(values)
+                return name, close
+        except Exception as error:
+            print(f"Macro quote unavailable for {name}:", repr(error))
+            return name, None
+    try:
+        async with httpx.AsyncClient(timeout=15, headers={"User-Agent":"BTC-Trading-OS/1.0 market-research"}) as client:
+            results=await asyncio.gather(*(fetch_one(client,name,symbol) for name,symbol in symbols.items()))
+        for name,close in results:
+            if close is not None: values[name]=close
+        if values:
+            macro_store.save_macro_markets(values)
     except Exception as error:
         print("Macro market collector error:",repr(error))
 
