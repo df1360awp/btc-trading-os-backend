@@ -29,6 +29,7 @@ from market.risk_api import router as risk_router
 from market.fcm_sender import send_to_active_devices
 from market.market_analysis import MarketAnalysisService, MarketAnalysisStore, init_market_analysis_tables
 from market.research_context import compose_research_context
+from market.home import build_home_payload
 from market.journal import JournalStore
 from market.data_health import market_data_health
 from market.app_auth import init_app_sessions
@@ -99,7 +100,7 @@ async def check_official_macro_releases():
 
 async def collect_macro_markets():
     """Store public reference markets used only for macro explanation."""
-    symbols={"DXY":"DX-Y.NYB","US10Y":"^TNX","GOLD":"GC=F","OIL":"CL=F"}
+    symbols={"SP500_FUTURES":"ES=F","NASDAQ100_FUTURES":"NQ=F","DXY":"DX-Y.NYB","US10Y":"^TNX","GOLD":"GC=F","OIL":"CL=F"}
     values={}
     try:
         async with httpx.AsyncClient(timeout=15) as client:
@@ -844,6 +845,17 @@ async def btc_research_context():
     state, signal = await asyncio.gather(btc_state(), btc_signal())
     price = state["price"]["average"]
     return compose_research_context(state, signal, support_resistance(price) if price else {}, liquidation_pressure())
+
+
+@app.get("/market/btc/home")
+async def btc_home():
+    """Mobile home-screen aggregate from existing market, macro and risk modules."""
+    state, signal = await asyncio.gather(btc_state(), btc_signal())
+    price = state["price"]["average"]
+    levels = support_resistance(price) if price else {}
+    observed_map = await asyncio.to_thread(liquidation_map, 43200, 250)
+    return build_home_payload(state, signal, levels, observed_map,
+                              macro_store.intelligence_context(), risk_store.list(5))
 
 
 @app.get("/market/btc/data-health")
