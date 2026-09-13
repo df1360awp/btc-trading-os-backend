@@ -15,7 +15,7 @@ from market.signal_engine import build_signal
 from market.alert_api import router as alert_router
 from market.fcm_api import router as fcm_router
 from market.alert_monitor import run_alert_monitor
-from market.liquidation import liquidation_pressure
+from market.liquidation import liquidation_map, liquidation_pressure
 from market.paper_api import router as paper_router
 from market.paper_trading import AccountRequest, PaperError, init_paper_tables
 from market.journal import init_journal_tables
@@ -748,6 +748,14 @@ async def btc_research_context():
 
 @app.get("/market/btc/data-health")
 async def btc_data_health(): return market_data_health(DB_PATH)
+
+
+@app.get("/market/btc/liquidation-map")
+async def btc_liquidation_map(window_seconds: int = 86400, price_bin_usd: int = 250):
+    try:
+        return liquidation_map(window_seconds, price_bin_usd)
+    except ValueError as error:
+        return JSONResponse(status_code=422, content={"error": "INVALID_LIQUIDATION_MAP", "detail": str(error)})
 
 
 @app.post("/ai/market-analysis", dependencies=[Depends(require_paper_key)])

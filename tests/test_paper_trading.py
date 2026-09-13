@@ -4,7 +4,7 @@ import pytest
 
 from market.paper_trading import AccountRequest, EntryRequest, PaperEngine, PaperError, ProtectionRequest, connect
 from market.paper_strategies import StrategyRunner
-from market.liquidation import liquidation_pressure
+from market.liquidation import liquidation_map, liquidation_pressure
 from market.journal import ImageRequest, JournalEntryRequest, JournalStore, init_journal_tables
 from market.ai_review import ReviewService
 from market.macro import MacroEvent, MacroRelease, MacroStore, MacroUpdate, init_macro_tables
@@ -215,6 +215,22 @@ def test_liquidation_pressure_uses_public_event_history(tmp_path):
     assert summary["recent_5m_liquidation_usd"] == 400
     assert summary["imbalance"] == pytest.approx(0.5)
     assert summary["state"] == "SHORT_SQUEEZE"
+
+
+def test_liquidation_map_groups_observed_events_by_price_level(tmp_path):
+    db_path=tmp_path / "market.db"; now=1_800_000_000_000
+    with connect(str(db_path)) as db:
+        db.execute("CREATE TABLE liquidation_events(exchange TEXT,event_id TEXT,timestamp_ms INTEGER,side TEXT,price REAL,qty_btc REAL,notional_usd REAL)")
+        db.executemany("INSERT INTO liquidation_events VALUES(?,?,?,?,?,?,?)", [
+            ("binance","a",now-1_000,"long_liquidation",70020,1,70020),
+            ("binance","b",now-2_000,"short_liquidation",70110,2,140220),
+            ("binance","old",now-90_000_000,"short_liquidation",69900,1,69900),
+        ])
+    result=liquidation_map(3600,250,str(db_path),now)
+    assert result["source"] == "BINANCE_OBSERVED_FORCE_ORDERS"
+    assert result["event_count"] == 2
+    assert result["levels"][0]["price_from"] == 70000
+    assert result["levels"][0]["short_liquidation_usd"] == 140220
 
 
 def test_journal_keeps_reason_psychology_and_private_image(tmp_path):
