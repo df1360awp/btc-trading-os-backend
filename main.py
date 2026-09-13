@@ -116,7 +116,16 @@ def ensure_default_system_paper_strategy(price):
     no exchange client or real order path is involved.
     """
     from market.paper_api import engine, strategies
-    if strategies.list("SYSTEM"):
+    existing = strategies.list("SYSTEM")
+    if existing:
+        # Only migrate the server-created default, and only while flat.  User
+        # owned/system strategies remain untouched.
+        default = next((item for item in existing if item["id"] == "system-btc-confluence-v1"), None)
+        if default and "min_context_confirmations" not in default["definition"]:
+            try:
+                strategies.update(default["id"], {**default["definition"], "min_context_confirmations": 2, "max_level_distance_pct": 1.5})
+            except PaperError:
+                pass
         return
     account_id = "paper-system-btc-v1"
     strategy_id = "system-btc-confluence-v1"
@@ -129,6 +138,7 @@ def ensure_default_system_paper_strategy(price):
         "quantity": "0.001", "stop_distance": "600", "take_distance": "1200",
         "cooldown_seconds": 900, "exit_on_opposite_signal": True,
         "min_abs_exit_score": 3, "max_hold_seconds": 86400,
+        "min_context_confirmations": 2, "max_level_distance_pct": 1.5,
     })
 
 

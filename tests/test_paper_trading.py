@@ -137,6 +137,18 @@ def test_system_strategy_can_gate_existing_signal_with_market_confluence(engine)
     assert runner.on_signal(100, signal, context)["opened"] == 1
 
 
+def test_system_strategy_requires_directional_oi_cvd_obi_confluence(engine):
+    engine.create_account(AccountRequest(account_id="system-context",strategy_type="SYSTEM",strategy_id="b-context"),"b-context",Decimal("100"))
+    runner=StrategyRunner(engine)
+    runner.create("SYSTEM",{"id":"b-context","account_id":"system-context","quantity":"1","stop_distance":"10","take_distance":"20","min_context_confirmations":2})
+    signal={"score":3,"bias":"BULLISH","structure":"UP"}
+    weak={"oi":{"average_change_5m_pct":1},"cvd":{"composite_5m_btc":-1},"obi":{"composite_obi":-0.1}}
+    assert runner.on_signal(100,signal,weak)["opened"] == 0
+    strong={"oi":{"average_change_5m_pct":1},"cvd":{"composite_5m_btc":2},"obi":{"composite_obi":0.1},"liquidation":{"state":"BALANCED"}}
+    assert runner.on_signal(100,signal,strong)["opened"] == 1
+    assert runner.events("b-context")[0]["market_context"]["system_confluence"]["confirmations"] >= 2
+
+
 def test_strategy_conditions_use_actual_support_resistance_context_fields(engine):
     engine.create_account(AccountRequest(account_id="levels",strategy_type="USER",strategy_id="levels"),"levels",Decimal("100"))
     runner=StrategyRunner(engine)

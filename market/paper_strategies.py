@@ -40,6 +40,8 @@ class SystemStrategy(Model):
     exit_on_opposite_signal: bool = True
     min_abs_exit_score: int | None = Field(default=None, ge=1, le=10)
     max_hold_seconds: int | None = Field(default=None, ge=60, le=2_592_000)
+    min_context_confirmations: int = Field(default=0, ge=0, le=5)
+    max_level_distance_pct: Decimal | None = Field(default=None, gt=0, le=20)
 
 
 class StrategyEnabled(Model):
@@ -75,6 +77,30 @@ class StrategyRunner:
             if op == "GTE" and Decimal(str(actual)) < Decimal(str(expected)): return False
             if op == "LTE" and Decimal(str(actual)) > Decimal(str(expected)): return False
         return True
+
+    @staticmethod
+    def system_confluence(direction, context, definition):
+        """Directional confirmation from existing OI/CVD/OBI/levels/liquidations."""
+        confirmations, reasons = 0, []
+        positive = direction == "LONG"
+        oi = context.get("oi", {}).get("average_change_5m_pct")
+        if oi is not None and (float(oi) > 0 if positive else float(oi) < 0):
+            confirmations += 1; reasons.append("OI方向一致")
+        cvd = context.get("cvd", {}).get("composite_5m_btc")
+        if cvd is not None and (float(cvd) > 0 if positive else float(cvd) < 0):
+            confirmations += 1; reasons.append("CVD方向一致")
+        obi = context.get("obi", {}).get("composite_obi")
+        if obi is not None and (float(obi) > 0 if positive else float(obi) < 0):
+            confirmations += 1; reasons.append("OBI方向一致")
+        levels = context.get("support_resistance", {})
+        distance = levels.get("support_distance_pct" if positive else "resistance_distance_pct")
+        if distance is not None and definition.max_level_distance_pct is not None and float(distance) <= float(definition.max_level_distance_pct):
+            confirmations += 1; reasons.append("接近关键支撑阻力")
+        liquidation_state = context.get("liquidation", {}).get("state")
+        adverse = "LONG_LIQUIDATION" if positive else "SHORT_SQUEEZE"
+        if liquidation_state and liquidation_state != adverse:
+            confirmations += 1; reasons.append("清算压力未逆向")
+        return confirmations >= definition.min_context_confirmations, {"confirmations": confirmations, "required": definition.min_context_confirmations, "reasons": reasons}
 
     def create(self, route, payload):
         cls = UserStrategy if route == "USER" else SystemStrategy
@@ -186,11 +212,14 @@ class StrategyRunner:
                 continue
             if (not direction or abs(score) < d.min_abs_score or cooling
                     or not self.conditions_match(d.conditions, context)): continue
+            confluence_ok, confluence = self.system_confluence(direction, context, d)
+            if not confluence_ok:
+                continue
             stop = Decimal(amount(price-d.stop_distance if direction == "LONG" else price+d.stop_distance))
             take = Decimal(amount(price+d.take_distance if direction == "LONG" else price-d.take_distance))
             order = self.engine.enter(d.account_id,EntryRequest(direction=direction,quantity=d.quantity,stop_loss=stop,take_profit=take),"system:"+d.id+":"+str(self.engine.clock()),price)
             if order["status"] == "FILLED":
-                self.event(d.id,order["position_id"],"SIGNAL_ENTRY",{**context,"signal":signal})
+                self.event(d.id,order["position_id"],"SIGNAL_ENTRY",{**context,"signal":signal,"system_confluence":confluence})
                 self.save_state(d.id,{"last_entry_ms":self.engine.clock(),"last_signal":fingerprint,"last_direction":direction})
                 opened += 1
         return {"opened":opened, "closed":closed}
