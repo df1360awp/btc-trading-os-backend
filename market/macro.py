@@ -40,6 +40,10 @@ def init_macro_tables(db_path):
       CREATE INDEX IF NOT EXISTS idx_macro_impacts_event ON macro_impacts(event_id,created_ms);
       CREATE TABLE IF NOT EXISTS macro_source_releases(id TEXT PRIMARY KEY,source TEXT NOT NULL,title TEXT NOT NULL,url TEXT NOT NULL UNIQUE,published_ms INTEGER NOT NULL,event_id TEXT,extracted_actual TEXT,confidence TEXT NOT NULL,raw_text TEXT,created_ms INTEGER NOT NULL,FOREIGN KEY(event_id) REFERENCES macro_events(id));
       CREATE INDEX IF NOT EXISTS idx_macro_source_event ON macro_source_releases(event_id,published_ms DESC);
+      CREATE TABLE IF NOT EXISTS macro_market_snapshots(id INTEGER PRIMARY KEY AUTOINCREMENT,timestamp_ms INTEGER NOT NULL,symbol TEXT NOT NULL,value REAL NOT NULL,source TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS idx_macro_market_time ON macro_market_snapshots(symbol,timestamp_ms DESC);
+      CREATE TABLE IF NOT EXISTS macro_impact_ratings(id TEXT PRIMARY KEY,event_id TEXT NOT NULL,rating INTEGER NOT NULL,bias TEXT NOT NULL,analysis TEXT NOT NULL,model TEXT NOT NULL,context_json TEXT NOT NULL,created_ms INTEGER NOT NULL,FOREIGN KEY(event_id) REFERENCES macro_events(id));
+      CREATE INDEX IF NOT EXISTS idx_macro_ratings_event ON macro_impact_ratings(event_id,created_ms DESC);
     """)
 
 
@@ -108,11 +112,25 @@ class MacroStore:
             structured_row = None
             if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='market_context_snapshots'").fetchone():
                 structured_row = db.execute("SELECT timestamp_ms,context_json FROM market_context_snapshots ORDER BY ABS(timestamp_ms-?) LIMIT 1", (event["scheduled_ms"],)).fetchone()
+            macro_rows=db.execute("""SELECT m.symbol,m.value,m.source,m.timestamp_ms FROM macro_market_snapshots m
+                WHERE m.timestamp_ms=(SELECT MAX(x.timestamp_ms) FROM macro_market_snapshots x WHERE x.symbol=m.symbol AND x.timestamp_ms<=?)""",(event["scheduled_ms"],)).fetchall()
         structured = None
         if structured_row:
             try: structured=json.loads(structured_row["context_json"])
             except (TypeError, json.JSONDecodeError): pass
-        return {"event":event,"nearby_market_snapshots":[dict(row) for row in rows],"structured_market_context":structured,"structured_market_context_at_ms":structured_row["timestamp_ms"] if structured_row else None}
+        return {"event":event,"nearby_market_snapshots":[dict(row) for row in rows],"structured_market_context":structured,"structured_market_context_at_ms":structured_row["timestamp_ms"] if structured_row else None,"macro_markets":[dict(row) for row in macro_rows]}
+
+    def save_macro_markets(self, values, timestamp_ms=None, source="YAHOO_FINANCE"):
+        now=timestamp_ms or self.clock()
+        with connect(self.db_path) as db:
+            for symbol,value in values.items():
+                if value is not None: db.execute("INSERT INTO macro_market_snapshots(timestamp_ms,symbol,value,source) VALUES(?,?,?,?)",(now,symbol,float(value),source))
+        return values
+
+    def save_impact_rating(self,event_id,rating,bias,analysis,model,context):
+        item={"id":str(uuid.uuid4()),"event_id":event_id,"rating":int(rating),"bias":bias,"analysis":analysis,"model":model,"context_json":json.dumps(context,ensure_ascii=False,default=str),"created_ms":self.clock()}
+        with connect(self.db_path) as db: db.execute("INSERT INTO macro_impact_ratings(id,event_id,rating,bias,analysis,model,context_json,created_ms) VALUES(:id,:event_id,:rating,:bias,:analysis,:model,:context_json,:created_ms)",item)
+        return item
 
     def begin_impact_analysis(self, event_id):
         event=self.get(event_id)

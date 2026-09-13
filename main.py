@@ -93,6 +93,22 @@ async def check_official_macro_releases():
         print("Official macro release monitor error:", repr(error))
 
 
+async def collect_macro_markets():
+    """Store public reference markets used only for macro explanation."""
+    symbols={"DXY":"DX-Y.NYB","US10Y":"^TNX","GOLD":"GC=F","OIL":"CL=F"}
+    values={}
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            for name,symbol in symbols.items():
+                response=await client.get(f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}",params={"range":"5d","interval":"1d"})
+                response.raise_for_status(); result=response.json().get("chart",{}).get("result") or []
+                close=(result[0].get("meta",{}).get("regularMarketPrice") if result else None)
+                if close is not None: values[name]=close
+        macro_store.save_macro_markets(values)
+    except Exception as error:
+        print("Macro market collector error:",repr(error))
+
+
 async def check_sudden_risks():
     """Poll a public news index, then alert only new high-severity items."""
     if os.getenv("RISK_NEWS_ENABLED", "true").lower() not in {"1", "true", "yes"}:
@@ -595,6 +611,7 @@ async def startup():
     )
     scheduler.add_job(check_macro_reminders, "interval", minutes=5, max_instances=1)
     scheduler.add_job(check_official_macro_releases, "interval", minutes=20, max_instances=1)
+    scheduler.add_job(collect_macro_markets, "interval", minutes=15, max_instances=1)
     scheduler.add_job(check_sudden_risks, "interval", minutes=10, max_instances=1)
     scheduler.add_job(run_scheduled_journal_review, CronTrigger(hour=0, minute=15, timezone="Asia/Shanghai"), args=["DAILY"], max_instances=1)
     scheduler.add_job(run_scheduled_journal_review, CronTrigger(day_of_week="mon", hour=0, minute=25, timezone="Asia/Shanghai"), args=["WEEKLY"], max_instances=1)
@@ -602,6 +619,7 @@ async def startup():
     scheduler.start()
 
     await collect_market_snapshot()
+    await collect_macro_markets()
     # The first trusted quote is now available for virtual-account valuation.
     from market.paper_api import mark_price
     ensure_default_system_paper_strategy(mark_price())

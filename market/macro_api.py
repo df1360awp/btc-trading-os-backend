@@ -3,6 +3,7 @@ from market.macro import MacroEvent, MacroRelease, MacroStore, MacroUpdate
 from market.fcm_sender import send_to_active_devices
 from market.paper_trading import require_paper_key
 from market.macro_analysis import MacroAnalysisService
+from market.macro_intelligence import MacroIntelligenceService
 store=MacroStore("/opt/btc-trading-os/market.db")
 router=APIRouter(prefix="/macro",tags=["Macro Intelligence"])
 
@@ -41,3 +42,9 @@ def list_impacts(event_id:str|None=None,limit:int=Query(default=100,ge=1,le=500)
 
 @router.get("/source-releases")
 def list_source_releases(limit:int=Query(default=100,ge=1,le=500)): return store.source_releases(limit)
+
+@router.post("/events/{event_id}/impact-rating",dependencies=[Depends(require_paper_key)])
+def impact_rating(event_id:str):
+    context=store.impact_context(event_id)
+    result=MacroIntelligenceService().evaluate(context)
+    return store.save_impact_rating(event_id,**result)
