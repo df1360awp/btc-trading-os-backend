@@ -43,6 +43,7 @@ class RiskStore:
         if any(token in value for token in ("outage", "halt", "maintenance", "down", "failure")): return "EXCHANGE_OUTAGE", "HIGH"
         if any(token in value for token in ("sanction", "ban", "sec ", "regulator", "lawsuit")): return "REGULATORY", "HIGH"
         if any(token in value for token in ("war", "missile", "invasion", "conflict", "emergency")): return "GEOPOLITICAL", "HIGH"
+        if "trump" in value and any(token in value for token in ("speech", "remarks", "statement", "address", "tariff")): return "TRUMP_SPEECH", "HIGH"
         if any(token in value for token in ("treasury yield", "bank failure", "liquidity crisis", "default")): return "MACRO_FINANCIAL", "HIGH"
         return "MARKET_NEWS", "MEDIUM"
 

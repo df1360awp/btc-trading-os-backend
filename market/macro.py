@@ -14,7 +14,7 @@ class Model(BaseModel): model_config = ConfigDict(extra="forbid")
 class MacroEvent(Model):
     id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_.:-]{1,128}$")
     title: str = Field(min_length=2, max_length=200)
-    event_type: str = Field(pattern=r"^(CPI|CORE_CPI|PPI|PCE|CORE_PCE|NFP|ADP|JOBLESS_CLAIMS|GDP|ISM|FOMC|FED_SPEECH|OTHER)$")
+    event_type: str = Field(pattern=r"^(CPI|CORE_CPI|PPI|PCE|CORE_PCE|NFP|ADP|JOBLESS_CLAIMS|GDP|ISM|FOMC|FED_SPEECH|TRUMP_SPEECH|OTHER)$")
     scheduled_ms: int = Field(gt=0)
     forecast: str | None = Field(default=None, max_length=100)
     previous: str | None = Field(default=None, max_length=100)
@@ -26,7 +26,7 @@ class MacroRelease(Model):
 
 class MacroUpdate(Model):
     title: str = Field(min_length=2, max_length=200)
-    event_type: str = Field(pattern=r"^(CPI|CORE_CPI|PPI|PCE|CORE_PCE|NFP|ADP|JOBLESS_CLAIMS|GDP|ISM|FOMC|FED_SPEECH|OTHER)$")
+    event_type: str = Field(pattern=r"^(CPI|CORE_CPI|PPI|PCE|CORE_PCE|NFP|ADP|JOBLESS_CLAIMS|GDP|ISM|FOMC|FED_SPEECH|TRUMP_SPEECH|OTHER)$")
     scheduled_ms: int = Field(gt=0)
     forecast: str | None = Field(default=None, max_length=100)
     previous: str | None = Field(default=None, max_length=100)
@@ -131,6 +131,15 @@ class MacroStore:
         item={"id":str(uuid.uuid4()),"event_id":event_id,"rating":int(rating),"bias":bias,"analysis":analysis,"model":model,"context_json":json.dumps(context,ensure_ascii=False,default=str),"created_ms":self.clock()}
         with connect(self.db_path) as db: db.execute("INSERT INTO macro_impact_ratings(id,event_id,rating,bias,analysis,model,context_json,created_ms) VALUES(:id,:event_id,:rating,:bias,:analysis,:model,:context_json,:created_ms)",item)
         return item
+
+    def intelligence_context(self, now_ms=None):
+        now=now_ms or self.clock()
+        with connect(self.db_path) as db:
+            events=db.execute("SELECT * FROM macro_events WHERE scheduled_ms BETWEEN ? AND ? ORDER BY scheduled_ms",(now-24*3600000,now+24*3600000)).fetchall()
+            markets=db.execute("""SELECT m.symbol,m.value,m.source,m.timestamp_ms FROM macro_market_snapshots m
+                WHERE m.timestamp_ms=(SELECT MAX(x.timestamp_ms) FROM macro_market_snapshots x WHERE x.symbol=m.symbol)""").fetchall()
+            ratings=db.execute("SELECT event_id,rating,bias,analysis,created_ms FROM macro_impact_ratings ORDER BY created_ms DESC LIMIT 10").fetchall()
+        return {"events_nearby":[dict(row) for row in events],"markets":[dict(row) for row in markets],"recent_ratings":[dict(row) for row in ratings]}
 
     def begin_impact_analysis(self, event_id):
         event=self.get(event_id)

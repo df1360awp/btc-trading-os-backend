@@ -857,7 +857,8 @@ async def btc_liquidation_map(window_seconds: int = 86400, price_bin_usd: int = 
 @app.post("/ai/market-analysis", dependencies=[Depends(require_paper_key)])
 async def ai_market_analysis():
     state, signal = await asyncio.gather(btc_state(), btc_signal())
-    context = {"market_state": state, "signal_engine": signal, "liquidation": liquidation_pressure()}
+    context = {"market_state": state, "signal_engine": signal, "liquidation": liquidation_pressure(),
+               "macro_intelligence": macro_store.intelligence_context(), "sudden_risks": risk_store.list(20)}
     result = await asyncio.to_thread(MarketAnalysisService().explain, context)
     return market_analysis_store.create(result)
 
